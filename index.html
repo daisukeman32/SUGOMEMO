@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="day">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SUGOMEMO</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <input type="file" id="editFileInput" accept="audio/*,video/*" hidden>
+  <input type="file" id="imageFileInput" accept="image/*" multiple hidden>
+
+  <header class="header">
+    <div class="header-left">
+      <h1 class="logo"><span class="logo-s">S</span><span class="logo-u">U</span><span class="logo-g">G</span><span class="logo-o">O</span><span class="logo-m">M</span><span class="logo-e">E</span><span class="logo-m2">M</span><span class="logo-o2">O</span></h1>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="edit">
+        <span class="tab-label">EDIT</span>
+        <span class="tab-dot"></span>
+      </button>
+      <button class="tab" data-tab="image">
+        <span class="tab-label">IMAGE</span>
+        <span class="tab-dot"></span>
+      </button>
+      <button class="tab" data-tab="memo">
+        <span class="tab-label">MEMO</span>
+        <span class="tab-dot"></span>
+      </button>
+    </nav>
+    <div class="header-right">
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+        <span class="theme-icon"></span>
+      </button>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- EDIT Section (Audio + Video unified) -->
+    <section class="section active" id="section-edit">
+      <div class="edit-layout">
+        <!-- Upper half: Preview + Drop -->
+        <div class="edit-upper">
+          <div class="edit-preview" id="editPreview">
+            <video id="editVideo" playsinline muted></video>
+            <div class="edit-drop-zone" id="editDropZone">
+              <span class="drop-plus">+</span>
+              <span class="drop-text">音声・動画ファイルをドロップ</span>
+            </div>
+          </div>
+        </div>
+        <!-- Lower half: Timeline + Controls -->
+        <div class="edit-lower">
+          <!-- Timeline area -->
+          <div class="edit-timeline-area" id="editTimelineArea">
+            <div class="edit-timeline-scroll" id="editTimelineScroll">
+              <!-- Time ruler -->
+              <div class="edit-ruler" id="editRuler">
+                <canvas id="rulerCanvas"></canvas>
+                <div class="playhead playhead-ruler" id="editPlayheadRuler"></div>
+              </div>
+              <!-- Video track -->
+              <div class="edit-track" id="editVideoTrack">
+                <div class="track-label" id="videoTrackLabel" data-track="video">
+                  <span class="track-label-text">V</span>
+                  <button class="track-mute-btn" id="videoMuteBtn" title="Vトラック無効">&times;</button>
+                </div>
+                <div class="track-content" data-track="video">
+                  <canvas id="videoTrackCanvas"></canvas>
+                  <div class="track-trim-overlay">
+                    <div class="trim-dim trim-dim-left" id="videoDimLeft"></div>
+                    <div class="trim-dim trim-dim-right" id="videoDimRight"></div>
+                    <div class="trim-handle trim-handle-in" id="videoHandleIn"></div>
+                    <div class="trim-handle trim-handle-out" id="videoHandleOut"></div>
+                  </div>
+                </div>
+              </div>
+              <!-- Audio track -->
+              <div class="edit-track" id="editAudioTrack">
+                <div class="track-label active" id="audioTrackLabel" data-track="audio">
+                  <span class="track-label-text">A</span>
+                  <button class="track-mute-btn" id="audioMuteBtn" title="Aトラック無効">&times;</button>
+                </div>
+                <div class="track-content" data-track="audio">
+                  <canvas id="audioTrackCanvas"></canvas>
+                  <div class="track-trim-overlay">
+                    <div class="trim-dim trim-dim-left" id="audioDimLeft"></div>
+                    <div class="trim-dim trim-dim-right" id="audioDimRight"></div>
+                    <div class="trim-handle trim-handle-in" id="audioHandleIn"></div>
+                    <div class="trim-handle trim-handle-out" id="audioHandleOut"></div>
+                  </div>
+                </div>
+              </div>
+              <!-- Playhead overlay -->
+              <div class="edit-timeline-overlay" id="editTimelineOverlay">
+                <div class="playhead" id="editPlayhead"></div>
+              </div>
+            </div>
+          </div>
+          <!-- Zoom + Controls bar -->
+          <div class="edit-controls-bar">
+            <div class="edit-transport">
+              <button class="btn btn-icon" id="editPrevFrame" title="1フレーム戻る (←)">&#9664;&#9664;</button>
+              <button class="btn btn-circle" id="editPlayBtn" title="再生/停止 (Space)">
+                <span class="icon-play"></span>
+              </button>
+              <button class="btn btn-icon" id="editNextFrame" title="1フレーム進む (→)">&#9654;&#9654;</button>
+            </div>
+            <div class="edit-time-display">
+              <span class="time-track-badge" id="editTrackBadge">A</span>
+              <span class="time-label">IN</span>
+              <span class="time-value" id="editTimeIn">00:00.000</span>
+              <span class="time-label">DUR</span>
+              <span class="time-value" id="editTimeDur">00:00.000</span>
+              <span class="time-label">OUT</span>
+              <span class="time-value" id="editTimeOut">00:00.000</span>
+            </div>
+            <div class="edit-actions">
+              <button class="btn btn-ghost btn-small" id="editMarkIn" title="I = In点">[ I</button>
+              <button class="btn btn-ghost btn-small" id="editMarkOut" title="O = Out点">O ]</button>
+              <button class="btn btn-icon btn-small" id="editZoomOut" title="縮小 (-)">−</button>
+              <span class="zoom-level" id="editZoomLevel">×1</span>
+              <button class="btn btn-icon btn-small" id="editZoomIn" title="拡大 (+)">+</button>
+              <button class="btn btn-icon btn-small" id="editZoomFit" title="全体表示 (0)">全体</button>
+              <button class="btn" id="editExportBtn">書き出し</button>
+              <button class="btn btn-ghost btn-small" id="editResetBtn">リセット</button>
+            </div>
+          </div>
+          <div class="edit-status" id="editStatus"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- IMAGE Section -->
+    <section class="section" id="section-image">
+      <div class="image-drop-zone" id="imageDropZone">
+        <span class="drop-plus">+</span>
+        <span class="drop-text">画像をドロップ</span>
+      </div>
+      <div class="image-workspace" id="imageWorkspace" hidden>
+        <div class="image-toolbar" id="imageToolbar">
+          <div class="toolbar-group">
+            <button class="btn btn-small" id="imageAddBtn" title="画像追加">+ 画像</button>
+            <button class="btn btn-small" id="imageAddTextBtn" title="テキスト追加">+ 文字</button>
+          </div>
+          <div class="toolbar-group">
+            <select class="select select-small" id="canvasSizePreset">
+              <option value="custom">カスタム</option>
+              <option value="a4">A4</option>
+              <option value="a3">A3</option>
+              <option value="b5">B5</option>
+              <option value="b4">B4</option>
+              <option value="1920x1080">FHD</option>
+              <option value="3840x2160">4K</option>
+              <option value="1080x1080">正方形</option>
+              <option value="1080x1350">Instagram</option>
+            </select>
+            <select class="select select-small" id="canvasOrientation">
+              <option value="landscape">横</option>
+              <option value="portrait">縦</option>
+            </select>
+            <label class="toolbar-label">W</label>
+            <input type="number" class="toolbar-input" id="canvasWidthInput" value="1920" min="100" max="8000">
+            <label class="toolbar-label">H</label>
+            <input type="number" class="toolbar-input" id="canvasHeightInput" value="1080" min="100" max="8000">
+            <button class="btn btn-small" id="canvasSizeApply">適用</button>
+          </div>
+          <div class="toolbar-group">
+            <label class="toolbar-label">背景</label>
+            <input type="color" class="toolbar-color" id="canvasBgColor" value="#ffffff">
+            <button class="btn btn-small canvas-bg-preset" data-color="#ffffff" title="白">W</button>
+            <button class="btn btn-small canvas-bg-preset" data-color="#000000" title="黒">B</button>
+          </div>
+          <div class="toolbar-group">
+            <select class="select select-small" id="imageFormat">
+              <option value="png">PNG</option>
+              <option value="jpeg">JPG</option>
+            </select>
+            <button class="btn" id="imageExportBtn">書き出し</button>
+            <button class="btn btn-ghost btn-small" id="imageResetBtn">リセット</button>
+          </div>
+        </div>
+        <div class="image-canvas-area" id="imageCanvasArea">
+          <div class="image-canvas-wrapper" id="imageCanvasWrapper">
+            <canvas id="imageCanvas"></canvas>
+            <div class="image-objects-layer" id="imageObjectsLayer"></div>
+          </div>
+        </div>
+        <div class="image-props-bar" id="imagePropsBar" hidden>
+          <label class="toolbar-label">X</label>
+          <input type="number" class="toolbar-input" id="propX" value="0">
+          <label class="toolbar-label">Y</label>
+          <input type="number" class="toolbar-input" id="propY" value="0">
+          <label class="toolbar-label">回転</label>
+          <input type="number" class="toolbar-input" id="propRotation" value="0" min="-360" max="360">
+          <label class="toolbar-label">倍率%</label>
+          <input type="number" class="toolbar-input" id="propScale" value="100" min="1" max="1000">
+          <button class="btn btn-small btn-ghost" id="propDeleteBtn">削除</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MEMO Section -->
+    <section class="section" id="section-memo">
+      <div class="memo-container">
+        <div class="memo-sidebar" id="memoSidebar">
+          <div class="memo-sidebar-header">
+            <span class="memo-sidebar-title">タグ</span>
+            <button class="btn btn-small" id="memoTagAddBtn">+</button>
+          </div>
+          <div class="memo-tag-list" id="memoTagList"></div>
+        </div>
+        <div class="memo-content" id="memoContent">
+          <div class="memo-content-header">
+            <span class="memo-content-title" id="memoContentTitle">タグを選択</span>
+            <button class="btn btn-small" id="memoAddBtn" hidden>+ 追加</button>
+          </div>
+          <div class="memo-item-list" id="memoItemList"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script src="js/memo.js"></script>
+  <script src="js/edit.js"></script>
+  <script src="js/image.js"></script>
+</body>
+</html>
