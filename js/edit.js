@@ -15,10 +15,9 @@ window.EditModule = (() => {
   let mediaFile = null;
   let duration = 0;
 
-  // Per-track trim (seconds)
-  let videoTrimIn = 0, videoTrimOut = 0;
-  let audioTrimIn = 0, audioTrimOut = 0;
-  let activeTrack = 'audio';
+  // Trim (seconds) - V/A共通
+  let trimIn = 0, trimOut = 0;
+  let activeTrack = 'audio'; // ミュート/削除対象の選択用
 
   // Track mute
   let videoMuted = false;
@@ -34,9 +33,18 @@ window.EditModule = (() => {
   let currentTime = 0;
   let animFrameId = null;
 
+  // Volume (0.0 ~ 2.0, default 1.0)
+  let volumeLevel = 1.0;
+
   // Drag state
   let trimDrag = null;
   let isSeeking = false;
+  let volumeDrag = false;
+
+  // Audio gain nodes for volume control
+  let gainNode = null;           // For audio-only (BufferSource) playback
+  let mediaElementSource = null; // For video audio routing (created once)
+  let videoGainNode = null;      // For video audio volume
 
   // Video thumbnail cache
   let thumbCache = []; // [{time, canvas}]
@@ -54,8 +62,9 @@ window.EditModule = (() => {
   let statusEl, zoomLevelEl;
 
   // Trim DOM
-  let videoDimLeft, videoDimRight, videoHandleIn, videoHandleOut;
-  let audioDimLeft, audioDimRight, audioHandleIn, audioHandleOut;
+  let videoDimLeft, videoDimRight;
+  let audioDimLeft, audioDimRight;
+  let trimHandleIn, trimHandleOut;
   let videoTrackLabel, audioTrackLabel;
 
   function init() {
@@ -87,14 +96,16 @@ window.EditModule = (() => {
 
     videoDimLeft = document.getElementById('videoDimLeft');
     videoDimRight = document.getElementById('videoDimRight');
-    videoHandleIn = document.getElementById('videoHandleIn');
-    videoHandleOut = document.getElementById('videoHandleOut');
     audioDimLeft = document.getElementById('audioDimLeft');
     audioDimRight = document.getElementById('audioDimRight');
-    audioHandleIn = document.getElementById('audioHandleIn');
-    audioHandleOut = document.getElementById('audioHandleOut');
+    trimHandleIn = document.getElementById('trimHandleIn');
+    trimHandleOut = document.getElementById('trimHandleOut');
     videoTrackLabel = document.getElementById('videoTrackLabel');
     audioTrackLabel = document.getElementById('audioTrackLabel');
+
+    // Volume line
+    const volLine = document.getElementById('volumeLine');
+    if (volLine) updateVolumeLine();
 
     if (!eventsbound) { bindEvents(); eventsbound = true; }
 
@@ -122,18 +133,12 @@ window.EditModule = (() => {
   }
   function onMarkIn() {
     if (!duration) return;
-    const trimOut = activeTrack === 'video' ? videoTrimOut : audioTrimOut;
-    const val = Math.min(currentTime, trimOut - 0.001);
-    if (activeTrack === 'video') videoTrimIn = val;
-    else audioTrimIn = val;
+    trimIn = Math.min(currentTime, trimOut - 0.001);
     updateTrimUI(); updateTimeDisplay();
   }
   function onMarkOut() {
     if (!duration) return;
-    const trimIn = activeTrack === 'video' ? videoTrimIn : audioTrimIn;
-    const val = Math.max(currentTime, trimIn + 0.001);
-    if (activeTrack === 'video') videoTrimOut = val;
-    else audioTrimOut = val;
+    trimOut = Math.max(currentTime, trimIn + 0.001);
     updateTrimUI(); updateTimeDisplay();
   }
 
@@ -152,13 +157,22 @@ window.EditModule = (() => {
       if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
     });
 
-    // Trim handle drag + seek drag
+    // Volume line drag
+    document.getElementById('volumeLine').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      volumeDrag = true;
+    });
+
+    // Trim handle drag + seek drag + volume drag
     document.addEventListener('mousemove', (e) => {
+      if (volumeDrag) { onVolumeDrag(e); return; }
       if (trimDrag) { onTrimDrag(e); return; }
       if (isSeeking) { onSeekDrag(e); return; }
     });
     document.addEventListener('mouseup', () => {
       trimDrag = null;
+      volumeDrag = false;
       if (isSeeking) {
         isSeeking = false;
         document.body.classList.remove('seeking');
@@ -195,11 +209,9 @@ window.EditModule = (() => {
       }
     });
 
-    // Bind trim handles
-    bindTrimHandle('videoHandleIn', 'video', 'in');
-    bindTrimHandle('videoHandleOut', 'video', 'out');
-    bindTrimHandle('audioHandleIn', 'audio', 'in');
-    bindTrimHandle('audioHandleOut', 'audio', 'out');
+    // Bind unified trim handles
+    bindTrimHandle('trimHandleIn', 'in');
+    bindTrimHandle('trimHandleOut', 'out');
 
     // Mute buttons
     document.getElementById('videoMuteBtn').addEventListener('click', (e) => {
@@ -237,7 +249,6 @@ window.EditModule = (() => {
     videoPlayerEl.addEventListener('timeupdate', () => {
       if (mediaType === 'video' && isPlaying) {
         currentTime = videoPlayerEl.currentTime;
-        const trimOut = activeTrack === 'video' ? videoTrimOut : audioTrimOut;
         if (currentTime >= trimOut) { stopPlayback(); }
       }
     });
@@ -275,14 +286,41 @@ window.EditModule = (() => {
     updateTimeDisplay();
   }
 
-  function bindTrimHandle(id, track, edge) {
+  function onVolumeDrag(e) {
+    const content = audioTrackEl.querySelector('.track-content');
+    const rect = content.getBoundingClientRect();
+    // 上端=200%, 下端=0%
+    let ratio = 1 - ((e.clientY - rect.top) / rect.height);
+    ratio = Math.max(0, Math.min(2, ratio * 2));
+    volumeLevel = Math.round(ratio * 100) / 100;
+    updateVolumeLine();
+    // リアルタイムで再生音量に反映
+    if (videoGainNode && !audioMuted) {
+      videoGainNode.gain.value = volumeLevel;
+    }
+    if (gainNode) {
+      gainNode.gain.value = volumeLevel;
+    }
+    // 波形を音量に連動して再描画（NLEの標準挙動）
+    if (audioBuffer) drawAudioTrack();
+  }
+
+  function updateVolumeLine() {
+    const volLine = document.getElementById('volumeLine');
+    if (!volLine) return;
+    // 50% = 中央, 0% = 下端, 100% = 上端 (volumeLevel 1.0 = 50%)
+    const pct = 100 - (volumeLevel / 2) * 100;
+    volLine.style.top = pct + '%';
+    volLine.dataset.vol = Math.round(volumeLevel * 100) + '%';
+  }
+
+  function bindTrimHandle(id, edge) {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener('mousedown', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      selectTrack(track);
-      trimDrag = { track, edge };
+      trimDrag = { edge };
     });
   }
 
@@ -290,20 +328,13 @@ window.EditModule = (() => {
     if (!trimDrag || !duration) return;
     e.preventDefault();
 
-    const trackEl = trimDrag.track === 'video' ? videoTrackEl : audioTrackEl;
-    const content = trackEl.querySelector('.track-content');
-    const rect = content.getBoundingClientRect();
+    const rect = overlayEl.getBoundingClientRect();
     let ratio = (e.clientX - rect.left) / rect.width;
     ratio = Math.max(0, Math.min(1, ratio));
     const t = ratio * duration;
 
-    if (trimDrag.track === 'video') {
-      if (trimDrag.edge === 'in') videoTrimIn = Math.min(t, videoTrimOut - 0.001);
-      else videoTrimOut = Math.max(t, videoTrimIn + 0.001);
-    } else {
-      if (trimDrag.edge === 'in') audioTrimIn = Math.min(t, audioTrimOut - 0.001);
-      else audioTrimOut = Math.max(t, audioTrimIn + 0.001);
-    }
+    if (trimDrag.edge === 'in') trimIn = Math.min(t, trimOut - 0.001);
+    else trimOut = Math.max(t, trimIn + 0.001);
 
     updateTrimUI();
     updateTimeDisplay();
@@ -322,10 +353,22 @@ window.EditModule = (() => {
     if (track === 'video') {
       videoMuted = !videoMuted;
       videoTrackEl.classList.toggle('muted', videoMuted);
+      // Vミュート時はプレビューも非表示
+      videoPlayerEl.classList.toggle('loaded', !videoMuted && mediaType === 'video');
+      // V消去時はAトラックをアクティブに
+      if (videoMuted && activeTrack === 'video') selectTrack('audio');
     } else {
       audioMuted = !audioMuted;
       audioTrackEl.classList.toggle('muted', audioMuted);
+      // A消去時はVトラックをアクティブに
+      if (audioMuted && activeTrack === 'audio' && mediaType === 'video' && !videoMuted) selectTrack('video');
     }
+    // Web Audio GainNode経由で音声ミュート制御
+    if (videoGainNode) {
+      videoGainNode.gain.value = audioMuted ? 0 : volumeLevel;
+    }
+    // 再生中なら停止
+    if (isPlaying) stopPlayback();
     updateExportLabel();
   }
 
@@ -370,6 +413,27 @@ window.EditModule = (() => {
 
   /* --- Load --- */
   function loadFile(file) {
+    // 既存メディアのクリーンアップ
+    stopPlayback();
+    if (videoPlayerEl.src) {
+      URL.revokeObjectURL(videoPlayerEl.src);
+      videoPlayerEl.src = '';
+    }
+    videoPlayerEl.classList.remove('loaded');
+    audioBuffer = null;
+    duration = 0;
+    thumbCache = []; thumbCacheReady = false;
+    trimIn = 0; trimOut = 0;
+    currentTime = 0;
+    volumeLevel = 1.0;
+    videoMuted = false; audioMuted = false;
+    timelineZoom = 1;
+    videoTrackEl.classList.remove('muted', 'empty');
+    audioTrackEl.classList.remove('muted', 'empty');
+    playheadEl.style.display = 'none';
+    playheadRulerEl.style.display = 'none';
+    setStatus('');
+
     mediaFile = file;
     const isVideo = file.type.startsWith('video/');
     mediaType = isVideo ? 'video' : 'audio';
@@ -377,8 +441,22 @@ window.EditModule = (() => {
     if (isVideo) {
       loadVideo(file);
     } else {
+      videoTrackEl.classList.add('empty');
       loadAudio(file);
     }
+  }
+
+  // Video audio → Web Audio API routing (createMediaElementSource は1要素1回のみ)
+  function ensureVideoAudioRouting() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (!mediaElementSource) {
+      mediaElementSource = audioCtx.createMediaElementSource(videoPlayerEl);
+      videoGainNode = audioCtx.createGain();
+      mediaElementSource.connect(videoGainNode);
+      videoGainNode.connect(audioCtx.destination);
+    }
+    videoGainNode.gain.value = volumeLevel;
   }
 
   function loadVideo(file) {
@@ -389,10 +467,12 @@ window.EditModule = (() => {
     videoPlayerEl.addEventListener('loadedmetadata', function onMeta() {
       videoPlayerEl.removeEventListener('loadedmetadata', onMeta);
       duration = videoPlayerEl.duration;
-      videoTrimIn = 0; videoTrimOut = duration;
-      audioTrimIn = 0; audioTrimOut = duration;
+      trimIn = 0; trimOut = duration;
       currentTime = 0;
       videoMuted = false; audioMuted = false;
+
+      // Web Audio API経由で音声ルーティング（音量200%対応）
+      ensureVideoAudioRouting();
 
       generateThumbCache();
 
@@ -419,7 +499,7 @@ window.EditModule = (() => {
       audioCtx.decodeAudioData(e.target.result).then(buf => {
         audioBuffer = buf;
         duration = buf.duration;
-        audioTrimIn = 0; audioTrimOut = duration;
+        trimIn = 0; trimOut = duration;
         currentTime = 0;
         activeTrack = 'audio';
         audioMuted = false;
@@ -450,6 +530,7 @@ window.EditModule = (() => {
     }
     updateExportLabel();
     updateTimeDisplay();
+    updateVolumeLine();
     setZoom(1);
   }
 
@@ -639,12 +720,17 @@ window.EditModule = (() => {
 
     if (!audioBuffer) return;
 
-    // Waveform
+    // Waveform (colored, volume-scaled like NLE)
     const channelData = audioBuffer.getChannelData(0);
     const samples = channelData.length;
     const step = Math.max(1, Math.ceil(samples / w));
-    audioTrackCtx.fillStyle = fg;
+    const isNight = App.getTheme() === 'night';
+    const waveColor = isNight ? '#4fc3f7' : '#1565c0';
+    const waveFill = isNight ? 'rgba(79,195,247,0.18)' : 'rgba(21,101,192,0.12)';
+    const vol = volumeLevel; // 波形をボリュームでスケール
 
+    // まずmin/maxを1回だけ計算してキャッシュ（2パス描画で使い回す）
+    const peaks = new Float32Array(w * 2); // [min0, max0, min1, max1, ...]
     for (let i = 0; i < w; i++) {
       let min = 1.0, max = -1.0;
       const start = Math.floor(i * samples / w);
@@ -654,8 +740,32 @@ window.EditModule = (() => {
         if (v < min) min = v;
         if (v > max) max = v;
       }
-      const yTop = ((1 - max) / 2) * h;
-      const yBot = ((1 - min) / 2) * h;
+      peaks[i * 2] = min;
+      peaks[i * 2 + 1] = max;
+    }
+
+    // Fill area (ボリュームスケール適用)
+    audioTrackCtx.fillStyle = waveFill;
+    audioTrackCtx.beginPath();
+    audioTrackCtx.moveTo(0, h / 2);
+    for (let i = 0; i < w; i++) {
+      const scaled = Math.min(1, peaks[i * 2 + 1] * vol);
+      audioTrackCtx.lineTo(i, ((1 - scaled) / 2) * h);
+    }
+    for (let i = w - 1; i >= 0; i--) {
+      const scaled = Math.max(-1, peaks[i * 2] * vol);
+      audioTrackCtx.lineTo(i, ((1 - scaled) / 2) * h);
+    }
+    audioTrackCtx.closePath();
+    audioTrackCtx.fill();
+
+    // Outline bars (ボリュームスケール適用)
+    audioTrackCtx.fillStyle = waveColor;
+    for (let i = 0; i < w; i++) {
+      const sMax = Math.min(1, peaks[i * 2 + 1] * vol);
+      const sMin = Math.max(-1, peaks[i * 2] * vol);
+      const yTop = ((1 - sMax) / 2) * h;
+      const yBot = ((1 - sMin) / 2) * h;
       audioTrackCtx.fillRect(i, yTop, 1, Math.max(0.5, yBot - yTop));
     }
   }
@@ -663,29 +773,25 @@ window.EditModule = (() => {
   /* --- Trim UI --- */
   function updateTrimUI() {
     if (!duration) return;
+    const inPct = (trimIn / duration) * 100;
+    const outPct = (trimOut / duration) * 100;
 
-    if (mediaType === 'video' && videoDimLeft) {
-      const vInPct = (videoTrimIn / duration) * 100;
-      const vOutPct = (videoTrimOut / duration) * 100;
-      videoDimLeft.style.width = vInPct + '%';
-      videoDimRight.style.width = (100 - vOutPct) + '%';
-      videoHandleIn.style.left = vInPct + '%';
-      videoHandleOut.style.right = (100 - vOutPct) + '%';
+    // 両トラックの暗転表示
+    if (videoDimLeft) {
+      videoDimLeft.style.width = inPct + '%';
+      videoDimRight.style.width = (100 - outPct) + '%';
     }
-
     if (audioDimLeft) {
-      const aInPct = (audioTrimIn / duration) * 100;
-      const aOutPct = (audioTrimOut / duration) * 100;
-      audioDimLeft.style.width = aInPct + '%';
-      audioDimRight.style.width = (100 - aOutPct) + '%';
-      audioHandleIn.style.left = aInPct + '%';
-      audioHandleOut.style.right = (100 - aOutPct) + '%';
+      audioDimLeft.style.width = inPct + '%';
+      audioDimRight.style.width = (100 - outPct) + '%';
     }
+
+    // 統一ハンドル位置（オーバーレイ上）
+    if (trimHandleIn) trimHandleIn.style.left = inPct + '%';
+    if (trimHandleOut) trimHandleOut.style.left = outPct + '%';
   }
 
   function updateTimeDisplay() {
-    const trimIn = activeTrack === 'video' ? videoTrimIn : audioTrimIn;
-    const trimOut = activeTrack === 'video' ? videoTrimOut : audioTrimOut;
     timeInEl.textContent = App.formatTime(trimIn);
     timeOutEl.textContent = App.formatTime(trimOut);
     timeDurEl.textContent = App.formatTime(trimOut - trimIn);
@@ -705,8 +811,6 @@ window.EditModule = (() => {
   function togglePlay() {
     if (isPlaying) stopPlayback();
     else {
-      const trimIn = activeTrack === 'video' ? videoTrimIn : audioTrimIn;
-      const trimOut = activeTrack === 'video' ? videoTrimOut : audioTrimOut;
       if (currentTime < trimIn || currentTime >= trimOut) currentTime = trimIn;
       playFromTime(currentTime);
     }
@@ -714,11 +818,12 @@ window.EditModule = (() => {
 
   function playFromTime(time) {
     if (!duration) return;
-    const trimOut = activeTrack === 'video' ? videoTrimOut : audioTrimOut;
 
     if (mediaType === 'video') {
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
       videoPlayerEl.currentTime = time;
-      videoPlayerEl.muted = audioMuted;
+      // 音量はWeb Audio GainNode経由で制御（200%まで対応）
+      if (videoGainNode) videoGainNode.gain.value = audioMuted ? 0 : volumeLevel;
       videoPlayerEl.play();
     } else {
       if (!audioCtx || !audioBuffer) return;
@@ -730,7 +835,13 @@ window.EditModule = (() => {
 
       sourceNode = audioCtx.createBufferSource();
       sourceNode.buffer = audioBuffer;
-      sourceNode.connect(audioCtx.destination);
+
+      // GainNode for volume control
+      gainNode = audioCtx.createGain();
+      gainNode.gain.value = volumeLevel;
+      sourceNode.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
       sourceNode.onended = () => { if (isPlaying) stopPlayback(); };
 
       playStartTime = audioCtx.currentTime;
@@ -760,6 +871,10 @@ window.EditModule = (() => {
       sourceNode.disconnect();
       sourceNode = null;
     }
+    if (gainNode) {
+      gainNode.disconnect();
+      gainNode = null;
+    }
   }
 
   function updatePlayBtn(playing) {
@@ -769,7 +884,6 @@ window.EditModule = (() => {
 
   function animatePlayhead() {
     if (!isPlaying) return;
-    const trimOut = activeTrack === 'video' ? videoTrimOut : audioTrimOut;
 
     if (mediaType === 'video') {
       currentTime = videoPlayerEl.currentTime;
@@ -795,30 +909,135 @@ window.EditModule = (() => {
   }
 
   /* --- Export --- */
+  let ffmpegInstance = null;
+  let ffmpegReady = false;
+
+  async function initFFmpeg() {
+    if (ffmpegReady) return true;
+    setStatus('FFmpeg読み込み中...');
+    try {
+      const mod = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+      ffmpegInstance = new mod.FFmpeg();
+      ffmpegInstance.on('progress', ({ progress }) => {
+        if (progress >= 0) setStatus(`処理中... ${Math.round(progress * 100)}%`);
+      });
+      await ffmpegInstance.load({
+        coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js',
+        wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
+      });
+      ffmpegReady = true;
+      return true;
+    } catch (e) {
+      console.error('FFmpeg init failed:', e);
+      return false;
+    }
+  }
+
   async function exportMedia() {
     if (!mediaFile) return;
+    if (videoMuted && audioMuted) return;
 
-    if (mediaType === 'audio') {
-      // 音声ファイル → WAV書き出し
-      exportWav();
-    } else if (videoMuted && !audioMuted) {
-      // 動画ファイルでV無効 → 音声のみWAV書き出し（FFmpeg不要）
-      exportWav();
-    } else if (audioMuted && !videoMuted) {
-      // 映像のみ → FFmpeg必要
-      await exportVideoFFmpeg();
+    if (mediaType === 'audio' || (videoMuted && !audioMuted)) {
+      // 音声のみ → MP3 (FFmpeg) / WAV (フォールバック)
+      await exportAudioFFmpeg();
     } else {
-      // 通常 → FFmpeg
+      // 映像含む → MP4 (FFmpeg) / MediaRecorder (フォールバック)
       await exportVideoFFmpeg();
     }
+  }
+
+  async function exportAudioFFmpeg() {
+    if (!await initFFmpeg()) {
+      // FFmpeg利用不可の場合はWAVフォールバック
+      exportWav();
+      return;
+    }
+
+    const srcExt = (mediaFile.name.match(/\.(\w+)$/) || [,'wav'])[1].toLowerCase();
+    const inFile = 'input.' + srcExt;
+    const outFile = 'output.mp3';
+
+    setStatus('ファイル読み込み中...');
+    const fileData = new Uint8Array(await mediaFile.arrayBuffer());
+    await ffmpegInstance.writeFile(inFile, fileData);
+
+    const args = ['-i', inFile, '-ss', String(trimIn), '-to', String(trimOut)];
+    args.push('-c:a', 'libmp3lame', '-q:a', '2');
+    args.push('-y', outFile);
+
+    setStatus('MP3書き出し中...');
+    await ffmpegInstance.exec(args);
+
+    const data = await ffmpegInstance.readFile(outFile);
+    const blob = new Blob([data.buffer], { type: 'audio/mpeg' });
+    App.downloadBlob(blob, 'trimmed.mp3');
+
+    try {
+      await ffmpegInstance.deleteFile(inFile);
+      await ffmpegInstance.deleteFile(outFile);
+    } catch(e) {}
+
+    setStatus('MP3書き出し完了');
+  }
+
+  async function exportVideoFFmpeg() {
+    if (!await initFFmpeg()) {
+      setStatus('FFmpeg利用不可。代替方式で書き出します...');
+      exportVideoFallback();
+      return;
+    }
+
+    const srcExt = (mediaFile.name.match(/\.(\w+)$/) || [,'mp4'])[1].toLowerCase();
+    const inFile = 'input.' + srcExt;
+
+    // 出力形式: 映像あり→MP4、映像なし(音声のみ)→MP3
+    const hasVideo = !videoMuted;
+    const outExt = hasVideo ? 'mp4' : 'mp3';
+    const outFile = 'output.' + outExt;
+
+    setStatus('ファイル読み込み中...');
+    const fileData = new Uint8Array(await mediaFile.arrayBuffer());
+    await ffmpegInstance.writeFile(inFile, fileData);
+
+    const args = ['-i', inFile, '-ss', String(trimIn), '-to', String(trimOut)];
+    if (audioMuted) {
+      args.push('-an');
+    }
+    if (videoMuted) {
+      args.push('-vn');
+    }
+    if (hasVideo) {
+      // 映像: ストリームコピー（無劣化）
+      args.push('-c:v', 'copy');
+      if (!audioMuted) args.push('-c:a', 'aac'); // MP4互換のためAAC
+    } else {
+      // 音声のみ: MP3に変換
+      args.push('-c:a', 'libmp3lame', '-q:a', '2');
+    }
+    args.push('-y', outFile);
+
+    setStatus('トリミング中...');
+    await ffmpegInstance.exec(args);
+
+    const data = await ffmpegInstance.readFile(outFile);
+    const mimeType = hasVideo ? 'video/mp4' : 'audio/mpeg';
+    const blob = new Blob([data.buffer], { type: mimeType });
+    App.downloadBlob(blob, 'trimmed.' + outExt);
+
+    try {
+      await ffmpegInstance.deleteFile(inFile);
+      await ffmpegInstance.deleteFile(outFile);
+    } catch(e) {}
+
+    setStatus('書き出し完了');
   }
 
   function exportWav() {
     if (!audioBuffer) return;
     setStatus('WAV書き出し中...');
     const sr = audioBuffer.sampleRate;
-    const startSample = Math.floor((audioTrimIn / duration) * audioBuffer.length);
-    const endSample = Math.floor((audioTrimOut / duration) * audioBuffer.length);
+    const startSample = Math.floor((trimIn / duration) * audioBuffer.length);
+    const endSample = Math.floor((trimOut / duration) * audioBuffer.length);
     const numSamples = endSample - startSample;
     const numCh = audioBuffer.numberOfChannels;
 
@@ -847,85 +1066,77 @@ window.EditModule = (() => {
     new Uint8Array(buf, 44).set(new Uint8Array(pcm.buffer));
 
     App.downloadBlob(new Blob([buf], { type: 'audio/wav' }), 'trimmed.wav');
-    setStatus('WAV書き出し完了');
+    setStatus('WAV書き出し完了（MP3にはFFmpegが必要です）');
   }
 
-  let ffmpeg = null, ffmpegLoaded = false, ffmpegLoading = false;
+  function exportVideoFallback() {
+    // フォールバック: MediaRecorder（再エンコードあり、高ビットレート）
+    setStatus('代替方式で書き出し中...');
 
-  async function exportVideoFFmpeg() {
-    if (!ffmpegLoaded && !ffmpegLoading) {
-      ffmpegLoading = true;
-      setStatus('FFmpeg読み込み中...');
+    const exportDuration = trimOut - trimIn;
+
+    // 録画用video（スピーカー出力は無音、captureStreamで音声取得）
+    const recVideo = document.createElement('video');
+    recVideo.src = videoPlayerEl.src;
+    recVideo.volume = 0;
+    recVideo.playsInline = true;
+
+    recVideo.addEventListener('loadedmetadata', () => {
+      recVideo.currentTime = trimIn;
+    });
+
+    recVideo.addEventListener('seeked', function onSeeked() {
+      recVideo.removeEventListener('seeked', onSeeked);
+
+      // captureStream で映像+音声ストリーム取得
+      let stream;
       try {
-        const { FFmpeg } = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
-        const { toBlobURL } = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
-        ffmpeg = new FFmpeg();
-        ffmpeg.on('progress', ({ progress }) => setStatus(`処理中: ${Math.round(progress * 100)}%`));
-        const coreURL = await toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js', 'text/javascript');
-        const wasmURL = await toBlobURL('https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm', 'application/wasm');
-        await ffmpeg.load({ coreURL, wasmURL });
-        ffmpegLoaded = true; ffmpegLoading = false;
-        setStatus('FFmpeg準備完了');
+        stream = recVideo.captureStream();
       } catch (e) {
-        ffmpegLoading = false;
-        setStatus('FFmpeg読み込み失敗: ' + e.message);
-        return;
-      }
-    }
-    if (!ffmpegLoaded) return;
-
-    setStatus('トリミング中...');
-    try {
-      const fileData = await mediaFile.arrayBuffer();
-      const ext = mediaFile.name.split('.').pop() || 'mp4';
-      await ffmpeg.writeFile(`in.${ext}`, new Uint8Array(fileData));
-
-      if (videoMuted && !audioMuted) {
-        // 音声のみ書き出し
-        await ffmpeg.exec(['-ss', String(audioTrimIn), '-i', `in.${ext}`,
-          '-t', String(audioTrimOut - audioTrimIn),
-          '-vn', '-c:a', 'copy', 'out.aac']);
-        const data = await ffmpeg.readFile('out.aac');
-        App.downloadBlob(new Blob([data.buffer], { type: 'audio/aac' }), 'trimmed.aac');
-        await ffmpeg.deleteFile('out.aac');
-      } else if (audioMuted && !videoMuted) {
-        // 映像のみ書き出し
-        await ffmpeg.exec(['-ss', String(videoTrimIn), '-i', `in.${ext}`,
-          '-t', String(videoTrimOut - videoTrimIn),
-          '-an', '-c:v', 'copy', `out.${ext}`]);
-        const data = await ffmpeg.readFile(`out.${ext}`);
-        App.downloadBlob(new Blob([data.buffer], { type: mediaFile.type || 'video/mp4' }), `trimmed.${ext}`);
-        await ffmpeg.deleteFile(`out.${ext}`);
-      } else if (Math.abs(videoTrimIn - audioTrimIn) < 0.01 && Math.abs(videoTrimOut - audioTrimOut) < 0.01) {
-        // 同じ範囲 → 単純カット
-        await ffmpeg.exec(['-ss', String(videoTrimIn), '-i', `in.${ext}`,
-          '-t', String(videoTrimOut - videoTrimIn), '-c', 'copy',
-          '-avoid_negative_ts', 'make_zero', `out.${ext}`]);
-        const data = await ffmpeg.readFile(`out.${ext}`);
-        App.downloadBlob(new Blob([data.buffer], { type: mediaFile.type || 'video/mp4' }), `trimmed.${ext}`);
-        await ffmpeg.deleteFile(`out.${ext}`);
-      } else {
-        // 異なる範囲 → V/A別に抽出して結合
-        await ffmpeg.exec(['-ss', String(videoTrimIn), '-i', `in.${ext}`,
-          '-t', String(videoTrimOut - videoTrimIn),
-          '-an', '-c:v', 'copy', 'temp_v.mp4']);
-        await ffmpeg.exec(['-ss', String(audioTrimIn), '-i', `in.${ext}`,
-          '-t', String(audioTrimOut - audioTrimIn),
-          '-vn', '-c:a', 'copy', 'temp_a.aac']);
-        await ffmpeg.exec(['-i', 'temp_v.mp4', '-i', 'temp_a.aac',
-          '-c', 'copy', '-shortest', `out.${ext}`]);
-        const data = await ffmpeg.readFile(`out.${ext}`);
-        App.downloadBlob(new Blob([data.buffer], { type: mediaFile.type || 'video/mp4' }), `trimmed.${ext}`);
-        try { await ffmpeg.deleteFile('temp_v.mp4'); } catch(e) {}
-        try { await ffmpeg.deleteFile('temp_a.aac'); } catch(e) {}
-        await ffmpeg.deleteFile(`out.${ext}`);
+        // captureStream未対応の場合
+        try { stream = recVideo.mozCaptureStream(); } catch (e2) {
+          setStatus('このブラウザでは動画書き出し非対応です。音声はWAVで書き出せます。');
+          return;
+        }
       }
 
-      await ffmpeg.deleteFile(`in.${ext}`);
-      setStatus('書き出し完了');
-    } catch (e) {
-      setStatus('書き出し失敗: ' + e.message);
-    }
+      // 音声ミュート時はaudioトラックを除去
+      if (audioMuted) {
+        stream.getAudioTracks().forEach(t => stream.removeTrack(t));
+      }
+
+      // MP4優先、非対応ならWebM
+      const mimeType = MediaRecorder.isTypeSupported('video/mp4')
+        ? 'video/mp4'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+          ? 'video/webm;codecs=vp9,opus'
+          : 'video/webm';
+
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 20000000 });
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(chunks, { type: mimeType });
+        App.downloadBlob(blob, `trimmed.${ext}`);
+        recVideo.src = '';
+        setStatus('書き出し完了（代替方式・再エンコード）');
+      };
+
+      setStatus(`代替方式で書き出し中... (${exportDuration.toFixed(1)}秒)`);
+      recorder.start();
+      recVideo.play();
+
+      // 指定時間で停止
+      const checkInterval = setInterval(() => {
+        if (recVideo.currentTime >= trimOut || recVideo.ended) {
+          clearInterval(checkInterval);
+          recVideo.pause();
+          recorder.stop();
+        }
+      }, 50);
+    });
   }
 
   function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
@@ -935,10 +1146,10 @@ window.EditModule = (() => {
     mediaFile = null; mediaType = null; audioBuffer = null;
     duration = 0;
     thumbCache = []; thumbCacheReady = false;
-    videoTrimIn = 0; videoTrimOut = 0;
-    audioTrimIn = 0; audioTrimOut = 0;
+    trimIn = 0; trimOut = 0;
     currentTime = 0; activeTrack = 'audio';
     videoMuted = false; audioMuted = false;
+    volumeLevel = 1.0;
     timelineZoom = 1;
     videoPlayerEl.src = '';
     videoPlayerEl.classList.remove('loaded');
@@ -949,6 +1160,7 @@ window.EditModule = (() => {
     playheadRulerEl.style.display = 'none';
     videoTrackEl.classList.remove('muted');
     audioTrackEl.classList.remove('muted');
+    updateVolumeLine();
     // Clear track canvases
     drawAll();
     setStatus('');

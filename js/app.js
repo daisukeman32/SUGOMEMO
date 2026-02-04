@@ -4,11 +4,12 @@
    ======================================== */
 
 const App = (() => {
-  let currentTab = 'edit';
+  let currentTab = 'memo';
   const modules = {};
 
   function init() {
     initTheme();
+    initFontSize();
     initTabs();
     initKeyboard();
     requestAnimationFrame(() => {
@@ -33,6 +34,39 @@ const App = (() => {
     if (modules[currentTab] && modules[currentTab].onThemeChange) {
       modules[currentTab].onThemeChange();
     }
+  }
+
+  /* --- Font Size --- */
+  const FONT_SIZES = [
+    { label: 'S', px: 13 },
+    { label: 'M', px: 15 },
+    { label: 'L', px: 17 }
+  ];
+  let fontSizeIndex = 1; // default M
+
+  function initFontSize() {
+    const saved = localStorage.getItem('sugomemo-fontsize');
+    if (saved !== null) {
+      const idx = FONT_SIZES.findIndex(f => f.label === saved);
+      if (idx !== -1) fontSizeIndex = idx;
+    }
+    applyFontSize();
+    document.getElementById('fontSizeDown').addEventListener('click', () => {
+      if (fontSizeIndex > 0) { fontSizeIndex--; applyFontSize(); saveFontSize(); }
+    });
+    document.getElementById('fontSizeUp').addEventListener('click', () => {
+      if (fontSizeIndex < FONT_SIZES.length - 1) { fontSizeIndex++; applyFontSize(); saveFontSize(); }
+    });
+  }
+
+  function applyFontSize() {
+    const size = FONT_SIZES[fontSizeIndex];
+    document.documentElement.style.setProperty('--base-font', size.px + 'px');
+    document.getElementById('fontSizeLabel').textContent = size.label;
+  }
+
+  function saveFontSize() {
+    localStorage.setItem('sugomemo-fontsize', FONT_SIZES[fontSizeIndex].label);
   }
 
   function getTheme() { return document.documentElement.getAttribute('data-theme') || 'day'; }
