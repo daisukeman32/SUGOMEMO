@@ -12,28 +12,35 @@
 
   <header class="header">
     <div class="header-left">
-      <h1 class="logo">Sugo<span class="logo-space"></span>MEMO</h1>
+      <h1 class="logo">SUGOMEMO</h1>
     </div>
     <nav class="tabs">
       <button class="tab active" data-tab="memo">
         <span class="tab-label">MEMO</span>
-        <span class="tab-dot"></span>
+        <span class="tab-indicator"></span>
       </button>
       <button class="tab" data-tab="image">
         <span class="tab-label">IMAGE</span>
-        <span class="tab-dot"></span>
+        <span class="tab-indicator"></span>
       </button>
       <button class="tab" data-tab="edit">
         <span class="tab-label">CUT</span>
-        <span class="tab-dot"></span>
+        <span class="tab-indicator"></span>
       </button>
     </nav>
     <div class="header-right">
-      <button class="font-size-btn" id="fontSizeDown">A-</button>
-      <span class="font-size-label" id="fontSizeLabel">M</span>
-      <button class="font-size-btn" id="fontSizeUp">A+</button>
-      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
-        <span class="theme-icon"></span>
+      <!-- Font Size -->
+      <div class="font-size-group">
+        <span class="font-size-title">SIZE</span>
+        <button class="font-size-opt" data-size="0" id="fontSizeS">S</button>
+        <button class="font-size-opt active" data-size="1" id="fontSizeM">M</button>
+        <button class="font-size-opt" data-size="2" id="fontSizeL">L</button>
+      </div>
+      <!-- Theme Toggle Switch -->
+      <button class="theme-switch" id="themeToggle" aria-label="Toggle theme">
+        <span class="theme-switch-label theme-switch-day">DAY</span>
+        <span class="theme-switch-knob"></span>
+        <span class="theme-switch-label theme-switch-night">NIGHT</span>
       </button>
     </div>
   </header>
@@ -154,67 +161,97 @@
       </div>
       <div class="image-workspace" id="imageWorkspace" hidden>
         <div class="image-toolbar" id="imageToolbar">
-          <!-- Row 1: Add + Size -->
-          <div class="toolbar-row">
-            <div class="toolbar-group">
+          <!-- Section: 追加 -->
+          <div class="toolbar-section">
+            <span class="toolbar-section-title">追加</span>
+            <div class="toolbar-section-body">
               <button class="btn" id="imageAddBtn" title="画像追加">+ 画像</button>
               <button class="btn" id="imageAddTextBtn" title="テキスト追加">+ 文字</button>
             </div>
-            <div class="toolbar-separator"></div>
-            <div class="toolbar-group">
+          </div>
+          <!-- Section: サイズ設定 -->
+          <div class="toolbar-section">
+            <span class="toolbar-section-title">サイズ設定</span>
+            <div class="toolbar-section-body">
               <select class="select" id="canvasSizePreset">
                 <option value="custom">カスタム</option>
-                <option value="a4">A4 (210×297mm)</option>
-                <option value="a3">A3 (297×420mm)</option>
-                <option value="b5">B5 (182×257mm)</option>
-                <option value="b4">B4 (257×364mm)</option>
-                <option value="1920x1080">FHD (1920×1080)</option>
-                <option value="3840x2160">4K (3840×2160)</option>
-                <option value="1080x1080">正方形 (1080×1080)</option>
-                <option value="1080x1350">Instagram (1080×1350)</option>
-                <option value="1920x200">バナー横 (1920×200)</option>
-                <option value="200x1080">バナー縦 (200×1080)</option>
+                <option value="a4">A4 (210x297mm)</option>
+                <option value="a3">A3 (297x420mm)</option>
+                <option value="b5">B5 (182x257mm)</option>
+                <option value="b4">B4 (257x364mm)</option>
+                <option value="1920x1080" selected>FHD (1920x1080)</option>
+                <option value="3840x2160">4K (3840x2160)</option>
+                <option value="1080x1080">正方形 (1080x1080)</option>
+                <option value="1080x1350">Instagram (1080x1350)</option>
+                <option value="1920x200">バナー横 (1920x200)</option>
+                <option value="200x1080">バナー縦 (200x1080)</option>
               </select>
               <select class="select" id="canvasOrientation">
                 <option value="landscape">横</option>
                 <option value="portrait">縦</option>
               </select>
-            </div>
-            <div class="toolbar-separator"></div>
-            <div class="toolbar-group">
               <label class="toolbar-label">W</label>
               <input type="number" class="toolbar-input" id="canvasWidthInput" value="1920" min="100" max="8000">
               <label class="toolbar-label">H</label>
               <input type="number" class="toolbar-input" id="canvasHeightInput" value="1080" min="100" max="8000">
-              <button class="btn" id="canvasSizeApply">適用</button>
+              <button class="btn btn-small" id="canvasSizeApply">適用</button>
             </div>
           </div>
-          <!-- Row 2: Background + Pen + Export -->
-          <div class="toolbar-row">
-            <div class="toolbar-group">
-              <label class="toolbar-label">背景</label>
+          <!-- Section: 背景 -->
+          <div class="toolbar-section">
+            <span class="toolbar-section-title">背景</span>
+            <div class="toolbar-section-body">
               <input type="color" class="toolbar-color" id="canvasBgColor" value="#ffffff">
-              <button class="btn btn-small canvas-bg-preset" data-color="#ffffff" title="白">W</button>
-              <button class="btn btn-small canvas-bg-preset" data-color="#000000" title="黒">B</button>
+              <button class="canvas-bg-swatch" data-color="#ffffff" title="白"><span class="bg-swatch-big">W</span><span class="bg-swatch-small">HITE</span></button>
+              <button class="canvas-bg-swatch" data-color="#000000" title="黒"><span class="bg-swatch-big">B</span><span class="bg-swatch-small">LACK</span></button>
             </div>
-            <div class="toolbar-separator"></div>
-            <div class="toolbar-group">
-              <button class="btn" id="imagePenBtn" title="ペンツール">ペン</button>
-              <select class="select select-small" id="penMode">
-                <option value="pen">ペン</option>
-                <option value="gauss">Gauss</option>
-                <option value="mosaic">Mosaic</option>
-              </select>
+          </div>
+          <!-- Section: 描画ツール -->
+          <div class="toolbar-section">
+            <span class="toolbar-section-title">描画ツール</span>
+            <div class="toolbar-section-body">
+              <button class="btn tool-btn" id="imagePenBtn" data-tool="pen" title="ペンツール">ペン</button>
+              <button class="btn tool-btn" id="imageGaussBtn" data-tool="gauss" title="ぼかしツール">ぼかし</button>
+              <button class="btn tool-btn" id="imageMosaicBtn" data-tool="mosaic" title="モザイクツール">モザイク</button>
+            </div>
+          </div>
+          <!-- Section: ペンオプション (動的表示) -->
+          <div class="toolbar-section tool-options-section" id="penOptions" hidden>
+            <span class="toolbar-section-title">ペン設定</span>
+            <div class="toolbar-section-body">
               <label class="toolbar-label">太さ</label>
-              <input type="range" class="toolbar-range" id="penSize" min="1" max="60" value="10">
-              <span class="toolbar-range-val" id="penSizeVal">10</span>
-              <input type="color" class="toolbar-color" id="penColor" value="#000000">
-              <label class="toolbar-label" id="penEffectLabel" hidden>強さ</label>
-              <input type="range" class="toolbar-range" id="penEffectSize" min="2" max="40" value="10" hidden>
-              <span class="toolbar-range-val" id="penEffectSizeVal" hidden>10</span>
+              <input type="range" class="toolbar-range" id="penSize" min="1" max="60" value="4">
+              <span class="toolbar-range-val" id="penSizeVal">4</span>
+              <label class="toolbar-label">色</label>
+              <input type="color" class="toolbar-color" id="penColor" value="#ff0000">
             </div>
-            <div class="toolbar-separator"></div>
-            <div class="toolbar-group">
+          </div>
+          <div class="toolbar-section tool-options-section" id="gaussOptions" hidden>
+            <span class="toolbar-section-title">ぼかし設定</span>
+            <div class="toolbar-section-body">
+              <label class="toolbar-label">太さ</label>
+              <input type="range" class="toolbar-range" id="gaussBrushSize" min="5" max="80" value="30">
+              <span class="toolbar-range-val" id="gaussBrushSizeVal">30</span>
+              <label class="toolbar-label">強さ</label>
+              <input type="range" class="toolbar-range" id="gaussEffectSize" min="2" max="40" value="7">
+              <span class="toolbar-range-val" id="gaussEffectSizeVal">7</span>
+            </div>
+          </div>
+          <div class="toolbar-section tool-options-section" id="mosaicOptions" hidden>
+            <span class="toolbar-section-title">モザイク設定</span>
+            <div class="toolbar-section-body">
+              <label class="toolbar-label">太さ</label>
+              <input type="range" class="toolbar-range" id="mosaicBrushSize" min="5" max="80" value="30">
+              <span class="toolbar-range-val" id="mosaicBrushSizeVal">30</span>
+              <label class="toolbar-label">粗さ</label>
+              <input type="range" class="toolbar-range" id="mosaicEffectSize" min="2" max="40" value="7">
+              <span class="toolbar-range-val" id="mosaicEffectSizeVal">7</span>
+            </div>
+          </div>
+          <!-- Section: 書き出し -->
+          <div class="toolbar-section">
+            <span class="toolbar-section-title">書き出し</span>
+            <div class="toolbar-section-body">
               <select class="select" id="imageFormat">
                 <option value="png">PNG</option>
                 <option value="jpeg">JPG</option>
@@ -223,9 +260,10 @@
               <button class="btn btn-ghost" id="imageResetBtn">リセット</button>
             </div>
           </div>
-          <!-- Row 3: Properties (shown when object selected) -->
-          <div class="toolbar-row" id="imagePropsBar" hidden>
-            <div class="toolbar-group">
+          <!-- Section: オブジェクト (選択時のみ表示) -->
+          <div class="toolbar-section" id="imagePropsBar" hidden>
+            <span class="toolbar-section-title">オブジェクト</span>
+            <div class="toolbar-section-body">
               <label class="toolbar-label">X</label>
               <input type="number" class="toolbar-input toolbar-input-lg" id="propX" value="0">
               <label class="toolbar-label">Y</label>
@@ -234,14 +272,10 @@
               <input type="number" class="toolbar-input toolbar-input-lg" id="propRotation" value="0" min="-360" max="360">
               <label class="toolbar-label">倍率%</label>
               <input type="number" class="toolbar-input toolbar-input-lg" id="propScale" value="100" min="1" max="1000">
-            </div>
-            <div class="toolbar-separator"></div>
-            <div class="toolbar-group">
+              <div class="toolbar-separator"></div>
               <button class="btn btn-ghost btn-small" id="propBringFront" title="最前面">▲前</button>
               <button class="btn btn-ghost btn-small" id="propSendBack" title="最背面">▼後</button>
-            </div>
-            <div class="toolbar-separator"></div>
-            <div class="toolbar-group">
+              <div class="toolbar-separator"></div>
               <button class="btn btn-ghost" id="propDeleteBtn">削除</button>
             </div>
           </div>

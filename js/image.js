@@ -12,6 +12,7 @@ window.ImageModule = (() => {
   let canvasW = 1920;
   let canvasH = 1080;
   let canvasBgColor = '#ffffff';
+  let canvasBgImage = null;
   let zoom = 1;
 
   let dragState = null;
@@ -26,11 +27,16 @@ window.ImageModule = (() => {
 
   // Effect pen state
   let preEffectCanvas = null;
+  let baseDisplayCache = null; // cached base render at display resolution
   let penMaskCanvas = null;
   let penMaskCtx = null;
   let currentPenEffectMode = null;
 
-  const SNAP_THRESHOLD = 15;
+  // Current tool: null | 'pen' | 'gauss' | 'mosaic'
+  let currentTool = null;
+
+  const SNAP_THRESHOLD = 24;
+  const SNAP_BREAK_MULT = 3.5;
 
   let dropZone, workspace, canvas, canvasCtx, objectsLayer;
   let propsBar, propX, propY, propRotation, propScale;
@@ -103,7 +109,7 @@ window.ImageModule = (() => {
     document.getElementById('canvasBgColor').addEventListener('input', (e) => {
       canvasBgColor = e.target.value; updateCanvas();
     });
-    document.querySelectorAll('.canvas-bg-preset').forEach(btn => {
+    document.querySelectorAll('.canvas-bg-preset, .canvas-bg-swatch').forEach(btn => {
       btn.addEventListener('click', () => {
         canvasBgColor = btn.dataset.color;
         document.getElementById('canvasBgColor').value = canvasBgColor;
@@ -123,8 +129,12 @@ window.ImageModule = (() => {
     document.getElementById('propBringFront').addEventListener('click', () => bringToFront(selectedId));
     document.getElementById('propSendBack').addEventListener('click', () => sendToBack(selectedId));
 
-    // ペンツール
-    document.getElementById('imagePenBtn').addEventListener('click', togglePen);
+    // ツールボタン（ペン・ぼかし・モザイク）
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.addEventListener('click', () => activateTool(btn.dataset.tool));
+    });
+
+    // 各ツールのスライダー
     const penSizeSlider = document.getElementById('penSize');
     const penSizeValEl = document.getElementById('penSizeVal');
     penSizeSlider.addEventListener('input', () => {
@@ -132,21 +142,25 @@ window.ImageModule = (() => {
       updatePenCursorSize();
     });
 
-    // ペンモード切替
-    const penModeSelect = document.getElementById('penMode');
-    penModeSelect.addEventListener('change', () => {
-      const mode = penModeSelect.value;
-      document.getElementById('penColor').hidden = (mode !== 'pen');
-      document.getElementById('penEffectLabel').hidden = (mode === 'pen');
-      document.getElementById('penEffectSize').hidden = (mode === 'pen');
-      document.getElementById('penEffectSizeVal').hidden = (mode === 'pen');
-      // Reset pre-effect if mode changed during pen
-      if (penMode) { preEffectCanvas = null; penMaskCanvas = null; penMaskCtx = null; currentPenEffectMode = null; }
+    const gaussBrushSlider = document.getElementById('gaussBrushSize');
+    const gaussBrushValEl = document.getElementById('gaussBrushSizeVal');
+    gaussBrushSlider.addEventListener('input', () => {
+      gaussBrushValEl.textContent = gaussBrushSlider.value;
+      updatePenCursorSize();
     });
+    const gaussEffectSlider = document.getElementById('gaussEffectSize');
+    const gaussEffectValEl = document.getElementById('gaussEffectSizeVal');
+    gaussEffectSlider.addEventListener('input', () => { gaussEffectValEl.textContent = gaussEffectSlider.value; rebuildEffectLive(); });
 
-    const effectSizeSlider = document.getElementById('penEffectSize');
-    const effectSizeValEl = document.getElementById('penEffectSizeVal');
-    effectSizeSlider.addEventListener('input', () => { effectSizeValEl.textContent = effectSizeSlider.value; });
+    const mosaicBrushSlider = document.getElementById('mosaicBrushSize');
+    const mosaicBrushValEl = document.getElementById('mosaicBrushSizeVal');
+    mosaicBrushSlider.addEventListener('input', () => {
+      mosaicBrushValEl.textContent = mosaicBrushSlider.value;
+      updatePenCursorSize();
+    });
+    const mosaicEffectSlider = document.getElementById('mosaicEffectSize');
+    const mosaicEffectValEl = document.getElementById('mosaicEffectSizeVal');
+    mosaicEffectSlider.addEventListener('input', () => { mosaicEffectValEl.textContent = mosaicEffectSlider.value; rebuildEffectLive(); });
 
     penCanvas.addEventListener('mousedown', penStart);
     penCanvas.addEventListener('mousemove', penMove);
@@ -184,7 +198,7 @@ window.ImageModule = (() => {
 
   function updatePenCursorSize() {
     if (!penCursorEl) return;
-    const sz = Math.max(4, (parseInt(document.getElementById('penSize').value) || 10) * zoom);
+    const sz = Math.max(4, getBrushSize() * zoom);
     penCursorEl.style.width = sz + 'px';
     penCursorEl.style.height = sz + 'px';
   }
@@ -290,6 +304,9 @@ window.ImageModule = (() => {
 
     canvasCtx.fillStyle = canvasBgColor;
     canvasCtx.fillRect(0, 0, displayW, displayH);
+    if (canvasBgImage) {
+      canvasCtx.drawImage(canvasBgImage, 0, 0, displayW, displayH);
+    }
   }
 
   /* --- Objects --- */
@@ -371,24 +388,95 @@ window.ImageModule = (() => {
     renderObjects(); selectObject(selectedId);
   }
 
-  /* --- Snap --- */
-  function snapPosition(obj) {
+  /* --- Snap (sticky lock) --- */
+  let snapLockX = null; // { target: snappedX, raw: originalRawX }
+  let snapLockY = null;
+
+  function snapPosition(obj, rawX, rawY) {
     let x = obj.x, y = obj.y;
     const guides = [];
+    const dragId = dragState ? dragState.id : -1;
 
-    // Edge snaps
-    if (Math.abs(x) < SNAP_THRESHOLD) { x = 0; guides.push({ t: 'v', p: 0 }); }
-    else if (Math.abs(x + obj.w - canvasW) < SNAP_THRESHOLD) { x = canvasW - obj.w; guides.push({ t: 'v', p: canvasW }); }
+    // Canvas edge + center targets: [snapValue, guideType, guidePos, 'edge'|'center']
+    const xTargets = [
+      [0, 'v', 0, 'edge'],
+      [canvasW - obj.w, 'v', canvasW, 'edge'],
+      [Math.round(canvasW / 2 - obj.w / 2), 'v', canvasW / 2, 'center']
+    ];
+    const yTargets = [
+      [0, 'h', 0, 'edge'],
+      [canvasH - obj.h, 'h', canvasH, 'edge'],
+      [Math.round(canvasH / 2 - obj.h / 2), 'h', canvasH / 2, 'center']
+    ];
 
-    if (Math.abs(y) < SNAP_THRESHOLD) { y = 0; guides.push({ t: 'h', p: 0 }); }
-    else if (Math.abs(y + obj.h - canvasH) < SNAP_THRESHOLD) { y = canvasH - obj.h; guides.push({ t: 'h', p: canvasH }); }
+    // Object-to-object snap targets
+    objects.forEach((other, i) => {
+      if (i === dragId) return;
+      xTargets.push([other.x, 'v', other.x, 'edge']);
+      xTargets.push([other.x + other.w, 'v', other.x + other.w, 'edge']);
+      xTargets.push([Math.round(other.x + other.w / 2 - obj.w / 2), 'v', Math.round(other.x + other.w / 2), 'center']);
+      xTargets.push([other.x - obj.w, 'v', other.x, 'edge']);
+      xTargets.push([other.x + other.w - obj.w, 'v', other.x + other.w, 'edge']);
 
-    // Center snaps
-    if (Math.abs(x + obj.w / 2 - canvasW / 2) < SNAP_THRESHOLD) {
-      x = Math.round(canvasW / 2 - obj.w / 2); guides.push({ t: 'v', p: canvasW / 2 });
+      yTargets.push([other.y, 'h', other.y, 'edge']);
+      yTargets.push([other.y + other.h, 'h', other.y + other.h, 'edge']);
+      yTargets.push([Math.round(other.y + other.h / 2 - obj.h / 2), 'h', Math.round(other.y + other.h / 2), 'center']);
+      yTargets.push([other.y - obj.h, 'h', other.y, 'edge']);
+      yTargets.push([other.y + other.h - obj.h, 'h', other.y + other.h, 'edge']);
+    });
+
+    // X axis snap
+    if (snapLockX !== null) {
+      const breakDist = Math.abs(rawX - snapLockX.target);
+      if (breakDist > SNAP_THRESHOLD * SNAP_BREAK_MULT) {
+        snapLockX = null;
+      } else {
+        x = snapLockX.target;
+        guides.push({ t: 'v', p: snapLockX.guide, locked: true, kind: snapLockX.kind });
+      }
     }
-    if (Math.abs(y + obj.h / 2 - canvasH / 2) < SNAP_THRESHOLD) {
-      y = Math.round(canvasH / 2 - obj.h / 2); guides.push({ t: 'h', p: canvasH / 2 });
+    if (snapLockX === null) {
+      let bestDist = SNAP_THRESHOLD;
+      let bestSnap = null;
+      for (const [target, gt, gp, kind] of xTargets) {
+        const d = Math.abs(x - target);
+        if (d < bestDist) {
+          bestDist = d;
+          bestSnap = { target, gt, gp, kind };
+        }
+      }
+      if (bestSnap) {
+        x = bestSnap.target;
+        snapLockX = { target: bestSnap.target, guide: bestSnap.gp, kind: bestSnap.kind };
+        guides.push({ t: bestSnap.gt, p: bestSnap.gp, locked: true, kind: bestSnap.kind });
+      }
+    }
+
+    // Y axis snap
+    if (snapLockY !== null) {
+      const breakDist = Math.abs(rawY - snapLockY.target);
+      if (breakDist > SNAP_THRESHOLD * SNAP_BREAK_MULT) {
+        snapLockY = null;
+      } else {
+        y = snapLockY.target;
+        guides.push({ t: 'h', p: snapLockY.guide, locked: true, kind: snapLockY.kind });
+      }
+    }
+    if (snapLockY === null) {
+      let bestDist = SNAP_THRESHOLD;
+      let bestSnap = null;
+      for (const [target, gt, gp, kind] of yTargets) {
+        const d = Math.abs(y - target);
+        if (d < bestDist) {
+          bestDist = d;
+          bestSnap = { target, gt, gp, kind };
+        }
+      }
+      if (bestSnap) {
+        y = bestSnap.target;
+        snapLockY = { target: bestSnap.target, guide: bestSnap.gp, kind: bestSnap.kind };
+        guides.push({ t: bestSnap.gt, p: bestSnap.gp, locked: true, kind: bestSnap.kind });
+      }
     }
 
     obj.x = x; obj.y = y;
@@ -401,6 +489,8 @@ window.ImageModule = (() => {
     guides.forEach(g => {
       const el = document.createElement('div');
       el.className = 'snap-guide';
+      if (g.locked) el.classList.add('snap-guide-locked');
+      if (g.kind === 'center') el.classList.add('snap-guide-center');
       if (g.t === 'h') { el.classList.add('snap-guide-h'); el.style.top = (g.p * zoom) + 'px'; }
       else { el.classList.add('snap-guide-v'); el.style.left = (g.p * zoom) + 'px'; }
       wrapper.appendChild(el);
@@ -411,12 +501,40 @@ window.ImageModule = (() => {
     document.getElementById('imageCanvasWrapper').querySelectorAll('.snap-guide').forEach(el => el.remove());
   }
 
-  /* --- Pen Tool --- */
-  function togglePen() {
-    if (penMode) finishPen(); else startPenMode();
+  /* --- Tool Activation --- */
+  function activateTool(tool) {
+    // If same tool clicked again → finish/deactivate
+    if (penMode && currentTool === tool) {
+      finishPen();
+      return;
+    }
+    // If different tool while in pen mode → finish current, start new
+    if (penMode) finishPen();
+
+    currentTool = tool;
+    startPenMode(tool);
   }
 
-  function startPenMode() {
+  function updateToolUI() {
+    // Update button active states
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.classList.toggle('active', penMode && btn.dataset.tool === currentTool);
+      if (penMode && btn.dataset.tool === currentTool) {
+        btn.textContent = '完了';
+      } else {
+        const labels = { pen: 'ペン', gauss: 'ぼかし', mosaic: 'モザイク' };
+        btn.textContent = labels[btn.dataset.tool] || btn.dataset.tool;
+      }
+    });
+
+    // Show/hide tool-specific options
+    document.getElementById('penOptions').hidden = !(penMode && currentTool === 'pen');
+    document.getElementById('gaussOptions').hidden = !(penMode && currentTool === 'gauss');
+    document.getElementById('mosaicOptions').hidden = !(penMode && currentTool === 'mosaic');
+  }
+
+  /* --- Pen Tool --- */
+  function startPenMode(tool) {
     penMode = true;
     penHasStrokes = false;
     selectObject(-1);
@@ -430,21 +548,33 @@ window.ImageModule = (() => {
     penCanvas.classList.add('active');
 
     preEffectCanvas = null;
+    baseDisplayCache = null;
     penMaskCanvas = null;
     penMaskCtx = null;
     currentPenEffectMode = null;
 
     createPenCursor();
     updatePenCursorSize();
-    document.getElementById('imagePenBtn').textContent = '完了';
+    updateToolUI();
   }
 
-  function buildPreEffect(mode) {
-    const effectSize = parseInt(document.getElementById('penEffectSize').value) || 10;
+  function getEffectSize() {
+    if (currentTool === 'gauss') return parseInt(document.getElementById('gaussEffectSize').value) || 7;
+    if (currentTool === 'mosaic') return parseInt(document.getElementById('mosaicEffectSize').value) || 7;
+    return 10;
+  }
+
+  function getBrushSize() {
+    if (currentTool === 'pen') return parseInt(document.getElementById('penSize').value) || 4;
+    if (currentTool === 'gauss') return parseInt(document.getElementById('gaussBrushSize').value) || 30;
+    if (currentTool === 'mosaic') return parseInt(document.getElementById('mosaicBrushSize').value) || 30;
+    return 10;
+  }
+
+  function ensureBaseDisplayCache() {
+    if (baseDisplayCache) return baseDisplayCache;
     const dw = penCanvas.width;
     const dh = penCanvas.height;
-
-    // Render base at display resolution
     const base = document.createElement('canvas');
     base.width = dw; base.height = dh;
     const bctx = base.getContext('2d');
@@ -452,6 +582,9 @@ window.ImageModule = (() => {
     bctx.scale(zoom, zoom);
     bctx.fillStyle = canvasBgColor;
     bctx.fillRect(0, 0, canvasW, canvasH);
+    if (canvasBgImage) {
+      bctx.drawImage(canvasBgImage, 0, 0, canvasW, canvasH);
+    }
     objects.forEach(obj => {
       bctx.save();
       bctx.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
@@ -466,12 +599,16 @@ window.ImageModule = (() => {
       bctx.restore();
     });
     bctx.restore();
+    baseDisplayCache = base;
+    return base;
+  }
 
-    // Apply effect
+  function applyEffectToBase(base, mode, effectSize) {
+    const dw = base.width;
+    const dh = base.height;
     const fx = document.createElement('canvas');
     fx.width = dw; fx.height = dh;
     const fctx = fx.getContext('2d');
-
     if (mode === 'gauss') {
       fctx.filter = 'blur(' + effectSize + 'px)';
       fctx.drawImage(base, 0, 0);
@@ -485,15 +622,48 @@ window.ImageModule = (() => {
       fctx.imageSmoothingEnabled = false;
       fctx.drawImage(small, 0, 0, dw, dh);
     }
-
     return fx;
+  }
+
+  function buildPreEffect(mode) {
+    const base = ensureBaseDisplayCache();
+    return applyEffectToBase(base, mode, getEffectSize());
+  }
+
+  // Rebuild effect + redraw penCanvas with current mask (real-time slider update)
+  let rebuildRAF = null;
+  function rebuildEffectLive() {
+    if (!penMode || !currentPenEffectMode || !penMaskCanvas) return;
+    if (rebuildRAF) cancelAnimationFrame(rebuildRAF);
+    rebuildRAF = requestAnimationFrame(() => {
+      rebuildRAF = null;
+      if (!penMode || !currentPenEffectMode || !penMaskCanvas) return;
+      const base = ensureBaseDisplayCache();
+      preEffectCanvas = applyEffectToBase(base, currentPenEffectMode, getEffectSize());
+      // Redraw penCanvas: effect masked by strokes
+      penCtx.save();
+      penCtx.clearRect(0, 0, penCanvas.width, penCanvas.height);
+      penCtx.drawImage(preEffectCanvas, 0, 0);
+      penCtx.globalCompositeOperation = 'destination-in';
+      penCtx.drawImage(penMaskCanvas, 0, 0);
+      penCtx.restore();
+      // Update stroke pattern so ongoing/future strokes use new effect
+      const newPattern = penCtx.createPattern(preEffectCanvas, 'no-repeat');
+      penCtx.strokeStyle = newPattern;
+      penCtx.fillStyle = newPattern;
+    });
   }
 
   function finishPen() {
     penMode = false;
     penCanvas.classList.remove('active');
     removePenCursor();
-    document.getElementById('imagePenBtn').textContent = 'ペン';
+
+    // Save effect size before resetting tool
+    const savedEffectSize = getEffectSize();
+
+    currentTool = null;
+    updateToolUI();
 
     if (!penHasStrokes) {
       cleanupPen();
@@ -505,10 +675,10 @@ window.ImageModule = (() => {
       const full = document.createElement('canvas');
       full.width = canvasW; full.height = canvasH;
       full.getContext('2d').drawImage(penCanvas, 0, 0, canvasW, canvasH);
-      createObjectFromCanvas(full);
+      flattenToBackground(full);
     } else {
       // Gauss / Mosaic → full-res effect masked by strokes
-      const effectSize = parseInt(document.getElementById('penEffectSize').value) || 10;
+      const effectSize = savedEffectSize;
       const base = renderBase();
 
       const fx = document.createElement('canvas');
@@ -544,7 +714,7 @@ window.ImageModule = (() => {
       rctx.drawImage(mask, 0, 0);
       rctx.globalCompositeOperation = 'source-over';
 
-      createObjectFromCanvas(result);
+      flattenToBackground(result);
     }
 
     cleanupPen();
@@ -554,6 +724,7 @@ window.ImageModule = (() => {
     penHasStrokes = false;
     penCtx.clearRect(0, 0, penCanvas.width, penCanvas.height);
     preEffectCanvas = null;
+    baseDisplayCache = null;
     penMaskCanvas = null;
     penMaskCtx = null;
     currentPenEffectMode = null;
@@ -565,6 +736,9 @@ window.ImageModule = (() => {
     const ctx = c.getContext('2d');
     ctx.fillStyle = canvasBgColor;
     ctx.fillRect(0, 0, canvasW, canvasH);
+    if (canvasBgImage) {
+      ctx.drawImage(canvasBgImage, 0, 0, canvasW, canvasH);
+    }
     objects.forEach(obj => {
       ctx.save();
       ctx.translate(obj.x + obj.w / 2, obj.y + obj.h / 2);
@@ -595,6 +769,24 @@ window.ImageModule = (() => {
     img.src = dataUrl;
   }
 
+  function flattenToBackground(penResultCanvas) {
+    const flat = renderBase();
+    const ctx = flat.getContext('2d');
+    ctx.drawImage(penResultCanvas, 0, 0);
+
+    const img = new Image();
+    img.onload = () => {
+      canvasBgImage = img;
+      objects.forEach(o => { if (o.url) URL.revokeObjectURL(o.url); });
+      objects = [];
+      selectedId = -1;
+      propsBar.hidden = true;
+      updateCanvas();
+      renderObjects();
+    };
+    img.src = flat.toDataURL('image/png');
+  }
+
   function penStart(e) {
     if (!penMode) return;
     penDrawing = true;
@@ -604,8 +796,8 @@ window.ImageModule = (() => {
     lastPenX = e.clientX - rect.left;
     lastPenY = e.clientY - rect.top;
 
-    const brushSize = parseInt(document.getElementById('penSize').value) || 10;
-    const mode = document.getElementById('penMode').value;
+    const brushSize = getBrushSize();
+    const mode = currentTool;
     const lineW = brushSize * zoom;
 
     penCtx.lineCap = 'round';
@@ -668,8 +860,7 @@ window.ImageModule = (() => {
     penCtx.lineTo(x, y);
     penCtx.stroke();
 
-    const mode = document.getElementById('penMode').value;
-    if (mode !== 'pen' && penMaskCtx) {
+    if (currentTool !== 'pen' && penMaskCtx) {
       penMaskCtx.beginPath();
       penMaskCtx.moveTo(lastPenX, lastPenY);
       penMaskCtx.lineTo(x, y);
@@ -761,9 +952,11 @@ window.ImageModule = (() => {
     const dy = (e.clientY - dragState.startY) / zoom;
 
     if (dragState.mode === 'move') {
-      obj.x = Math.round(dragState.origX + dx);
-      obj.y = Math.round(dragState.origY + dy);
-      const guides = snapPosition(obj);
+      const rawX = Math.round(dragState.origX + dx);
+      const rawY = Math.round(dragState.origY + dy);
+      obj.x = rawX;
+      obj.y = rawY;
+      const guides = snapPosition(obj, rawX, rawY);
       showSnapGuides(guides);
     } else if (dragState.mode === 'resize') {
       const aspect = dragState.aspect || 1;
@@ -790,7 +983,7 @@ window.ImageModule = (() => {
   }
 
   function onMouseUp() {
-    if (dragState) { clearSnapGuides(); dragState = null; }
+    if (dragState) { clearSnapGuides(); dragState = null; snapLockX = null; snapLockY = null; }
   }
 
   /* --- Export --- */
@@ -816,7 +1009,7 @@ window.ImageModule = (() => {
     objects.forEach(o => { if (o.url) URL.revokeObjectURL(o.url); });
     objects = [];
     selectedId = -1;
-    canvasW = 1920; canvasH = 1080; canvasBgColor = '#ffffff';
+    canvasW = 1920; canvasH = 1080; canvasBgColor = '#ffffff'; canvasBgImage = null;
     dropZone.hidden = false;
     workspace.hidden = true;
     propsBar.hidden = true;

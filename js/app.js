@@ -51,18 +51,27 @@ const App = (() => {
       if (idx !== -1) fontSizeIndex = idx;
     }
     applyFontSize();
-    document.getElementById('fontSizeDown').addEventListener('click', () => {
-      if (fontSizeIndex > 0) { fontSizeIndex--; applyFontSize(); saveFontSize(); }
-    });
-    document.getElementById('fontSizeUp').addEventListener('click', () => {
-      if (fontSizeIndex < FONT_SIZES.length - 1) { fontSizeIndex++; applyFontSize(); saveFontSize(); }
+
+    // S / M / L direct buttons
+    document.querySelectorAll('.font-size-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.size);
+        if (idx >= 0 && idx < FONT_SIZES.length) {
+          fontSizeIndex = idx;
+          applyFontSize();
+          saveFontSize();
+        }
+      });
     });
   }
 
   function applyFontSize() {
     const size = FONT_SIZES[fontSizeIndex];
     document.documentElement.style.setProperty('--base-font', size.px + 'px');
-    document.getElementById('fontSizeLabel').textContent = size.label;
+    // Update active state on buttons
+    document.querySelectorAll('.font-size-opt').forEach(btn => {
+      btn.classList.toggle('active', parseInt(btn.dataset.size) === fontSizeIndex);
+    });
   }
 
   function saveFontSize() {
