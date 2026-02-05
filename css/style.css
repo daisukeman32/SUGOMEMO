@@ -12,6 +12,7 @@
   --accent: #1a1a1a;
   --dot: #1a1a1a;
   --track-bg: #dddbd8;
+  --canvas-area-bg: #c8c6c3;
   --font: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
   --base-font: 15px;
   --radius: 0px;
@@ -26,6 +27,7 @@
   --accent: #e0ddd8;
   --dot: #e0ddd8;
   --track-bg: #181818;
+  --canvas-area-bg: #0a0a0a;
 }
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -662,7 +664,7 @@ body.seeking, body.seeking * { cursor: col-resize !important; }
 .image-canvas-area {
   flex: 1; overflow: auto; display: flex;
   align-items: center; justify-content: center;
-  background: var(--subtle); min-height: 0;
+  background: var(--canvas-area-bg); min-height: 0;
   position: relative;
 }
 

@@ -35,8 +35,8 @@ window.ImageModule = (() => {
   // Current tool: null | 'pen' | 'gauss' | 'mosaic'
   let currentTool = null;
 
-  const SNAP_THRESHOLD = 24;
-  const SNAP_BREAK_MULT = 3.5;
+  const SNAP_THRESHOLD = 40;
+  const SNAP_BREAK_MULT = 4.5;
 
   let dropZone, workspace, canvas, canvasCtx, objectsLayer;
   let propsBar;
@@ -242,10 +242,14 @@ window.ImageModule = (() => {
 
   /* --- Canvas --- */
   const PRESETS = {
-    'a4': [2480, 3508], 'a3': [3508, 4961], 'b5': [2150, 3035], 'b4': [3035, 4299],
+    '500x500': [500, 500],
     '1920x1080': [1920, 1080], '3840x2160': [3840, 2160],
-    '1080x1080': [1080, 1080], '1080x1350': [1080, 1350],
+    '1080x1920': [1080, 1920], '2160x3840': [2160, 3840],
+    'a4': [2480, 3508], 'a3': [3508, 4961], 'b5': [2150, 3035], 'b4': [3035, 4299],
+    '1080x1080': [1080, 1080],
     '1920x200': [1920, 200], '200x1080': [200, 1080],
+    '1200x675': [1200, 675], '1200x1600': [1200, 1600],
+    '1080x1350': [1080, 1350], '1700x2400': [1700, 2400],
   };
 
   function applyPreset() {
