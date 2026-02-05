@@ -195,8 +195,8 @@ window.MemoModule = (() => {
           <span class="memo-tag-dot"></span>
           <span class="memo-tag-name">${esc(tag.name)}</span>
           <span class="memo-tag-actions">
-            <button class="memo-tag-action-btn" data-action="rename" title="名前変更">R</button>
-            <button class="memo-tag-action-btn" data-action="delete" title="削除">&times;</button>
+            <button class="memo-tag-action-btn" data-action="rename" title="名前変更"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+            <button class="memo-tag-action-btn" data-action="delete" title="削除"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
           </span>
         `;
         el.addEventListener('click', (e) => {
@@ -289,11 +289,104 @@ window.MemoModule = (() => {
     titleInput.placeholder = 'タイトル';
     titleEl.replaceWith(titleInput);
 
+    // ツールバー
+    const toolbar = document.createElement('div');
+    toolbar.className = 'memo-edit-toolbar';
+    toolbar.innerHTML = `
+      <button class="memo-tb-btn" data-tag="b" title="太字"><b>B</b></button>
+      <button class="memo-tb-btn" data-tag="i" title="斜体"><i>I</i></button>
+      <button class="memo-tb-btn" data-tag="u" title="下線"><u>U</u></button>
+      <button class="memo-tb-btn" data-tag="s" title="取消線"><s>S</s></button>
+      <span class="memo-tb-sep"></span>
+      <select class="memo-tb-select" data-action="size" title="サイズ">
+        <option value="">サイズ</option>
+        <option value="12px">小</option>
+        <option value="16px">中</option>
+        <option value="20px">大</option>
+        <option value="28px">特大</option>
+      </select>
+      <input type="color" class="memo-tb-color" data-action="color" value="#000000" title="文字色">
+      <span class="memo-tb-sep"></span>
+      <button class="memo-tb-btn" data-action="link" title="リンク">🔗</button>
+      <button class="memo-tb-btn" data-action="code" title="コード">&lt;/&gt;</button>
+      <span class="memo-tb-sep"></span>
+      <button class="memo-tb-btn memo-tb-preview" data-action="preview" title="プレビュー切替">プレビュー</button>
+    `;
+
     const bodyTextarea = document.createElement('textarea');
     bodyTextarea.className = 'memo-inline-textarea';
     bodyTextarea.value = item.body;
     bodyTextarea.placeholder = 'テキストを入力... (本文)';
-    bodyEl.replaceWith(bodyTextarea);
+
+    const previewDiv = document.createElement('div');
+    previewDiv.className = 'memo-inline-preview';
+    previewDiv.hidden = true;
+
+    bodyEl.replaceWith(toolbar);
+    toolbar.after(bodyTextarea);
+    bodyTextarea.after(previewDiv);
+
+    // ツールバー: タグ挿入
+    function wrapSelection(openTag, closeTag) {
+      const start = bodyTextarea.selectionStart;
+      const end = bodyTextarea.selectionEnd;
+      const val = bodyTextarea.value;
+      const selected = val.substring(start, end);
+      bodyTextarea.value = val.substring(0, start) + openTag + selected + closeTag + val.substring(end);
+      bodyTextarea.focus();
+      bodyTextarea.setSelectionRange(start + openTag.length, start + openTag.length + selected.length);
+    }
+
+    toolbar.querySelectorAll('.memo-tb-btn[data-tag]').forEach(btn => {
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const tag = btn.dataset.tag;
+        wrapSelection('<' + tag + '>', '</' + tag + '>');
+      });
+    });
+
+    toolbar.querySelector('[data-action="size"]').addEventListener('change', (e) => {
+      const size = e.target.value;
+      if (size) {
+        wrapSelection('<span style="font-size:' + size + '">', '</span>');
+        e.target.value = '';
+      }
+    });
+
+    toolbar.querySelector('[data-action="color"]').addEventListener('input', (e) => {
+      const color = e.target.value;
+      wrapSelection('<span style="color:' + color + '">', '</span>');
+    });
+
+    toolbar.querySelector('[data-action="link"]').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const url = prompt('URL:');
+      if (url) wrapSelection('<a href="' + url + '">', '</a>');
+    });
+
+    toolbar.querySelector('[data-action="code"]').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      wrapSelection('<code>', '</code>');
+    });
+
+    // プレビュー切替
+    let previewing = false;
+    toolbar.querySelector('[data-action="preview"]').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      previewing = !previewing;
+      const btn = toolbar.querySelector('[data-action="preview"]');
+      if (previewing) {
+        previewDiv.innerHTML = sanitizeHTML(bodyTextarea.value) || '<span style="color:var(--mg)">(空)</span>';
+        bodyTextarea.hidden = true;
+        previewDiv.hidden = false;
+        btn.textContent = 'ソース';
+      } else {
+        bodyTextarea.hidden = false;
+        previewDiv.hidden = true;
+        btn.textContent = 'プレビュー';
+        bodyTextarea.focus();
+      }
+    });
 
     // 新規(タイトルが空)ならタイトルにフォーカス、既存ならボディにフォーカス
     if (!item.title) {
@@ -318,6 +411,7 @@ window.MemoModule = (() => {
     titleInput.addEventListener('focus', handleFocus);
     bodyTextarea.addEventListener('blur', handleBlur);
     bodyTextarea.addEventListener('focus', handleFocus);
+    toolbar.addEventListener('mousedown', () => { clearTimeout(blurTimeout); });
     titleInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); bodyTextarea.focus(); }
     });
@@ -360,7 +454,7 @@ window.MemoModule = (() => {
             <input type="checkbox" class="memo-item-checkbox" data-item-index="${i}">
             <span class="memo-item-title">${esc(item.title) || '<span style="color:var(--mg)">無題</span>'}</span>
           </div>
-          <div class="memo-item-body">${esc(item.body) || '<span style="color:var(--mg)">(空)</span>'}</div>
+          <div class="memo-item-body">${sanitizeHTML(item.body) || '<span style="color:var(--mg)">(空)</span>'}</div>
         `;
       } else {
         el.innerHTML = `
@@ -368,12 +462,12 @@ window.MemoModule = (() => {
             <span class="memo-item-title">${esc(item.title) || '<span style="color:var(--mg)">無題</span>'}</span>
             <span class="memo-copy-toast"></span>
             <span class="memo-item-actions">
-              <button class="memo-item-action-btn" data-action="copy" title="コピー">C</button>
-              <button class="memo-item-action-btn" data-action="edit" title="編集">E</button>
-              <button class="memo-item-action-btn" data-action="delete" title="削除">&times;</button>
+              <button class="memo-item-action-btn" data-action="copy" title="コピー"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+              <button class="memo-item-action-btn" data-action="edit" title="編集"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+              <button class="memo-item-action-btn" data-action="delete" title="削除"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg></button>
             </span>
           </div>
-          <div class="memo-item-body">${esc(item.body) || '<span style="color:var(--mg)">(空)</span>'}</div>
+          <div class="memo-item-body">${sanitizeHTML(item.body) || '<span style="color:var(--mg)">(空)</span>'}</div>
         `;
         // ボディクリックで編集モード
         el.querySelector('.memo-item-body').addEventListener('click', () => startEdit(i));
@@ -409,6 +503,49 @@ window.MemoModule = (() => {
     const d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
+  }
+
+  const ALLOWED_TAGS = new Set([
+    'B','I','U','S','EM','STRONG','SMALL','SUB','SUP','BR','P','DIV','SPAN',
+    'H1','H2','H3','H4','H5','H6','UL','OL','LI','DL','DT','DD',
+    'TABLE','THEAD','TBODY','TR','TH','TD','CAPTION',
+    'A','CODE','PRE','BLOCKQUOTE','HR','IMG','MARK','DETAILS','SUMMARY'
+  ]);
+  const ALLOWED_ATTRS = { 'A': ['href','target'], 'IMG': ['src','alt','width','height'], '*': ['class','style'] };
+
+  function sanitizeHTML(str) {
+    if (!str) return '';
+    // HTMLタグが含まれなければそのままエスケープ
+    if (!/[<&]/.test(str)) return esc(str);
+    const doc = new DOMParser().parseFromString(str, 'text/html');
+    function clean(node) {
+      const frag = document.createDocumentFragment();
+      node.childNodes.forEach(child => {
+        if (child.nodeType === 3) {
+          frag.appendChild(document.createTextNode(child.textContent));
+        } else if (child.nodeType === 1) {
+          if (!ALLOWED_TAGS.has(child.tagName)) {
+            frag.appendChild(clean(child));
+            return;
+          }
+          const el = document.createElement(child.tagName);
+          const allowed = [...(ALLOWED_ATTRS[child.tagName] || []), ...(ALLOWED_ATTRS['*'] || [])];
+          allowed.forEach(attr => {
+            const val = child.getAttribute(attr);
+            if (val !== null) {
+              if (attr === 'href' && /^\s*javascript:/i.test(val)) return;
+              el.setAttribute(attr, val);
+            }
+          });
+          el.appendChild(clean(child));
+          frag.appendChild(el);
+        }
+      });
+      return frag;
+    }
+    const container = document.createElement('div');
+    container.appendChild(clean(doc.body));
+    return container.innerHTML;
   }
 
   return { init, destroy, onThemeChange };

@@ -9,32 +9,46 @@
 <body>
   <input type="file" id="editFileInput" accept="audio/*,video/*" hidden>
   <input type="file" id="imageFileInput" accept="image/*" multiple hidden>
+  <input type="file" id="backupFileInput" accept=".json" hidden>
+
+  <!-- バックアップ復元リスト -->
+  <div class="backup-overlay" id="backupOverlay" hidden>
+    <div class="backup-modal">
+      <div class="backup-modal-header">
+        <span class="backup-modal-title">復元するバックアップを選択</span>
+        <button class="backup-modal-close" id="backupModalClose">&times;</button>
+      </div>
+      <div class="backup-modal-list" id="backupModalList"></div>
+    </div>
+  </div>
 
   <header class="header">
     <div class="header-left">
-      <h1 class="logo">SUGOMEMO</h1>
+      <h1 class="logo">SUGOMEMO<span class="logo-version">v3.0</span></h1>
     </div>
     <nav class="tabs">
       <button class="tab active" data-tab="memo">
+        <svg class="tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
         <span class="tab-label">MEMO</span>
-        <span class="tab-indicator"></span>
       </button>
       <button class="tab" data-tab="image">
+        <svg class="tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         <span class="tab-label">IMAGE</span>
-        <span class="tab-indicator"></span>
       </button>
       <button class="tab" data-tab="edit">
+        <svg class="tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/><line x1="6" y1="2" x2="6" y2="5"/><line x1="10" y1="2" x2="10" y2="5"/></svg>
         <span class="tab-label">CUT</span>
-        <span class="tab-indicator"></span>
       </button>
     </nav>
     <div class="header-right">
       <!-- Font Size -->
       <div class="font-size-group">
         <span class="font-size-title">SIZE</span>
-        <button class="font-size-opt" data-size="0" id="fontSizeS">S</button>
-        <button class="font-size-opt active" data-size="1" id="fontSizeM">M</button>
-        <button class="font-size-opt" data-size="2" id="fontSizeL">L</button>
+        <button class="font-size-opt" data-size="0">1</button>
+        <button class="font-size-opt" data-size="1">2</button>
+        <button class="font-size-opt active" data-size="2">3</button>
+        <button class="font-size-opt" data-size="3">4</button>
+        <button class="font-size-opt" data-size="4">5</button>
       </div>
       <!-- Theme Toggle Switch -->
       <button class="theme-switch" id="themeToggle" aria-label="Toggle theme">
@@ -299,6 +313,19 @@
             <button class="btn" id="memoTagAddBtn">+</button>
           </div>
           <div class="memo-tag-list" id="memoTagList"></div>
+          <div class="memo-sidebar-footer">
+            <div class="backup-folder-row" id="backupFolderRow">
+              <button class="backup-gear-btn" id="backupGearBtn" title="バックアップフォルダ設定">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </button>
+              <span class="backup-folder-label">バックアップ先:</span>
+              <span class="backup-folder-path" id="backupFolderPath">未設定</span>
+            </div>
+            <div class="backup-actions-row">
+              <button class="btn btn-ghost btn-small" id="backupExportBtn">バックアップ</button>
+              <button class="btn btn-ghost btn-small" id="backupImportBtn">復元</button>
+            </div>
+          </div>
         </div>
         <div class="memo-resize-handle" id="memoResizeHandle"></div>
         <div class="memo-content" id="memoContent">

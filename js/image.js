@@ -609,6 +609,7 @@ window.ImageModule = (() => {
     const fx = document.createElement('canvas');
     fx.width = dw; fx.height = dh;
     const fctx = fx.getContext('2d');
+    // effectSize をそのまま使用（表示解像度でのピクセル値）
     if (mode === 'gauss') {
       fctx.filter = 'blur(' + effectSize + 'px)';
       fctx.drawImage(base, 0, 0);
@@ -678,7 +679,9 @@ window.ImageModule = (() => {
       flattenToBackground(full);
     } else {
       // Gauss / Mosaic → full-res effect masked by strokes
-      const effectSize = savedEffectSize;
+      // プレビューは表示解像度で effectSize をそのまま使用するため、
+      // フル解像度では effectSize / zoom にスケールして見た目を一致させる
+      const fullResEffect = savedEffectSize / zoom;
       const base = renderBase();
 
       const fx = document.createElement('canvas');
@@ -686,11 +689,11 @@ window.ImageModule = (() => {
       const fctx = fx.getContext('2d');
 
       if (currentPenEffectMode === 'gauss') {
-        fctx.filter = 'blur(' + effectSize + 'px)';
+        fctx.filter = 'blur(' + fullResEffect + 'px)';
         fctx.drawImage(base, 0, 0);
         fctx.filter = 'none';
       } else {
-        const factor = Math.max(2, effectSize);
+        const factor = Math.max(2, fullResEffect);
         const sw = Math.max(1, Math.round(canvasW / factor));
         const sh = Math.max(1, Math.round(canvasH / factor));
         const small = document.createElement('canvas');

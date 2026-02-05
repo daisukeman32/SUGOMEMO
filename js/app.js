@@ -12,6 +12,8 @@ const App = (() => {
     initFontSize();
     initTabs();
     initKeyboard();
+    initBackup();
+    updateFontSizeVisibility();
     requestAnimationFrame(() => {
       if (window.MemoModule) modules.memo = window.MemoModule;
       if (window.EditModule) modules.edit = window.EditModule;
@@ -38,11 +40,13 @@ const App = (() => {
 
   /* --- Font Size --- */
   const FONT_SIZES = [
-    { label: 'S', px: 13 },
-    { label: 'M', px: 15 },
-    { label: 'L', px: 17 }
+    { label: '1', px: 11 },
+    { label: '2', px: 12.5 },
+    { label: '3', px: 14 },
+    { label: '4', px: 16 },
+    { label: '5', px: 18 }
   ];
-  let fontSizeIndex = 1; // default M
+  let fontSizeIndex = 2; // default 3
 
   function initFontSize() {
     const saved = localStorage.getItem('sugomemo-fontsize');
@@ -100,7 +104,13 @@ const App = (() => {
     document.getElementById(`section-${name}`).classList.add('active');
 
     currentTab = name;
+    updateFontSizeVisibility();
     if (modules[currentTab] && modules[currentTab].init) modules[currentTab].init();
+  }
+
+  function updateFontSizeVisibility() {
+    const el = document.querySelector('.font-size-group');
+    if (el) el.style.display = currentTab === 'memo' ? '' : 'none';
   }
 
   function getCurrentTab() { return currentTab; }
@@ -168,6 +178,245 @@ const App = (() => {
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  /* --- Backup / Restore --- */
+  const BACKUP_KEYS = [
+    'sugomemo-memo', 'sugomemo-theme', 'sugomemo-fontsize', 'sugomemo-sidebar-width'
+  ];
+  let backupDirHandle = null;
+
+  function initBackup() {
+    const gearBtn = document.getElementById('backupGearBtn');
+    const exportBtn = document.getElementById('backupExportBtn');
+    const importBtn = document.getElementById('backupImportBtn');
+    const fileInput = document.getElementById('backupFileInput');
+
+    if (gearBtn) gearBtn.addEventListener('click', pickBackupFolder);
+    if (exportBtn) exportBtn.addEventListener('click', exportBackup);
+    if (importBtn) importBtn.addEventListener('click', importBackup);
+    if (fileInput) fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) { importBackupFromFile(e.target.files[0]); e.target.value = ''; }
+    });
+    restoreDirHandle();
+  }
+
+  function backupFileName() {
+    const d = new Date();
+    const dateStr = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+    const timeStr = String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
+    return 'sugomemo-backup-' + dateStr + '-' + timeStr + '.json';
+  }
+
+  function buildBackupJSON() {
+    const backup = { version: '3.0', date: new Date().toISOString(), data: {} };
+    BACKUP_KEYS.forEach(key => {
+      const val = localStorage.getItem(key);
+      if (val !== null) backup.data[key] = val;
+    });
+    return JSON.stringify(backup, null, 2);
+  }
+
+  // IndexedDB: フォルダハンドルの永続化
+  function saveDirHandle(handle) {
+    const req = indexedDB.open('sugomemo-backup', 1);
+    req.onupgradeneeded = (e) => { e.target.result.createObjectStore('handles'); };
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      const tx = db.transaction('handles', 'readwrite');
+      tx.objectStore('handles').put(handle, 'backupDir');
+    };
+  }
+
+  function restoreDirHandle() {
+    const req = indexedDB.open('sugomemo-backup', 1);
+    req.onupgradeneeded = (e) => { e.target.result.createObjectStore('handles'); };
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      const tx = db.transaction('handles', 'readonly');
+      const getReq = tx.objectStore('handles').get('backupDir');
+      getReq.onsuccess = () => {
+        if (getReq.result) {
+          backupDirHandle = getReq.result;
+          updateFolderDisplay();
+        }
+      };
+    };
+  }
+
+  function updateFolderDisplay() {
+    const pathEl = document.getElementById('backupFolderPath');
+    if (!pathEl) return;
+    pathEl.textContent = backupDirHandle ? backupDirHandle.name : '未設定';
+  }
+
+  // 歯車ボタン: フォルダ選択
+  async function pickBackupFolder() {
+    if (!('showDirectoryPicker' in window)) {
+      alert('このブラウザはフォルダ選択に対応していません。\nChrome または Edge をご利用ください。');
+      return;
+    }
+    try {
+      backupDirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      saveDirHandle(backupDirHandle);
+      updateFolderDisplay();
+    } catch (e) {
+      if (e.name !== 'AbortError') alert('フォルダの選択に失敗しました。');
+    }
+  }
+
+  // フォルダ書き込み権限を確保
+  async function ensureDirPermission() {
+    if (!backupDirHandle) return false;
+    try {
+      let perm = await backupDirHandle.queryPermission({ mode: 'readwrite' });
+      if (perm === 'granted') return true;
+      perm = await backupDirHandle.requestPermission({ mode: 'readwrite' });
+      return perm === 'granted';
+    } catch (e) { return false; }
+  }
+
+  // バックアップ書き出し
+  async function exportBackup() {
+    // フォルダ設定済み + API対応: フォルダに自動保存
+    if (backupDirHandle && 'showDirectoryPicker' in window) {
+      try {
+        if (!await ensureDirPermission()) {
+          alert('フォルダへのアクセス権限がありません。\n歯車ボタンでフォルダを再設定してください。');
+          return;
+        }
+        const fileName = backupFileName();
+        const fileHandle = await backupDirHandle.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(buildBackupJSON());
+        await writable.close();
+
+        // 完了フィードバック
+        const btn = document.getElementById('backupExportBtn');
+        if (btn) {
+          const orig = btn.textContent;
+          btn.textContent = '完了';
+          setTimeout(() => { btn.textContent = orig; }, 1500);
+        }
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+    // フォルダ未設定 or 非対応: 従来のダウンロード
+    const blob = new Blob([buildBackupJSON()], { type: 'application/json' });
+    downloadBlob(blob, backupFileName());
+  }
+
+  // 復元
+  async function importBackup() {
+    // フォルダ設定済み: リストUIで選択
+    if (backupDirHandle && 'showDirectoryPicker' in window) {
+      try {
+        if (!await ensureDirPermission()) {
+          document.getElementById('backupFileInput').click();
+          return;
+        }
+        const files = [];
+        for await (const [name, handle] of backupDirHandle.entries()) {
+          if (handle.kind === 'file' && name.startsWith('sugomemo-backup-') && name.endsWith('.json')) {
+            files.push({ name, handle });
+          }
+        }
+        if (files.length === 0) {
+          alert('バックアップファイルが見つかりません。');
+          return;
+        }
+        files.sort((a, b) => b.name.localeCompare(a.name));
+        showBackupList(files);
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+      }
+    }
+    // フォルダ未設定: 従来のファイル選択
+    document.getElementById('backupFileInput').click();
+  }
+
+  function showBackupList(files) {
+    const overlay = document.getElementById('backupOverlay');
+    const list = document.getElementById('backupModalList');
+    const closeBtn = document.getElementById('backupModalClose');
+    list.innerHTML = '';
+
+    if (files.length === 0) {
+      list.innerHTML = '<div class="backup-modal-empty">バックアップが見つかりません</div>';
+    } else {
+      files.forEach((f, i) => {
+        const item = document.createElement('div');
+        item.className = 'backup-modal-item';
+
+        const num = document.createElement('span');
+        num.className = 'backup-item-num';
+        num.textContent = String(i + 1).padStart(2, '0');
+
+        const dateEl = document.createElement('span');
+        dateEl.className = 'backup-item-date';
+
+        const timeEl = document.createElement('span');
+        timeEl.className = 'backup-item-time';
+
+        const match = f.name.match(/sugomemo-backup-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/);
+        if (match) {
+          dateEl.textContent = match[1] + '.' + match[2] + '.' + match[3];
+          timeEl.textContent = match[4] + ':' + match[5];
+        } else {
+          dateEl.textContent = f.name.replace('sugomemo-backup-', '').replace('.json', '');
+        }
+
+        item.appendChild(num);
+        item.appendChild(dateEl);
+        item.appendChild(timeEl);
+
+        item.addEventListener('click', async () => {
+          closeBackupList();
+          try {
+            const file = await f.handle.getFile();
+            importBackupFromFile(file);
+          } catch (e) {
+            alert('ファイルの読み込みに失敗しました。');
+          }
+        });
+
+        list.appendChild(item);
+      });
+    }
+
+    overlay.hidden = false;
+
+    function onClose() { closeBackupList(); }
+    closeBtn.addEventListener('click', onClose, { once: true });
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) onClose();
+    }, { once: true });
+  }
+
+  function closeBackupList() {
+    document.getElementById('backupOverlay').hidden = true;
+  }
+
+  function importBackupFromFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const backup = JSON.parse(e.target.result);
+        if (!backup.data) throw new Error('Invalid format');
+        const dateInfo = backup.date ? ' (' + backup.date.split('T')[0] + ')' : '';
+        if (!confirm('バックアップを復元しますか？' + dateInfo + '\n現在のデータは上書きされます。')) return;
+        Object.entries(backup.data).forEach(([key, value]) => {
+          localStorage.setItem(key, value);
+        });
+        location.reload();
+      } catch (err) {
+        alert('バックアップファイルの読み込みに失敗しました。');
+      }
+    };
+    reader.readAsText(file);
   }
 
   document.addEventListener('DOMContentLoaded', init);
