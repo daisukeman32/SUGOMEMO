@@ -342,6 +342,39 @@
             </div>
           </div>
           <div class="memo-item-list" id="memoItemList"></div>
+          <!-- 展開表示 -->
+          <div class="memo-expand-view" id="memoExpandView" hidden>
+            <div class="memo-expand-header">
+              <input type="text" class="memo-expand-title" id="memoExpandTitle" placeholder="タイトル">
+              <button class="memo-expand-close" id="memoExpandClose" title="閉じる">×</button>
+            </div>
+            <div class="memo-expand-toolbar" id="memoExpandToolbar">
+              <button class="memo-tb-btn" data-tag="b" title="太字"><b>B</b></button>
+              <button class="memo-tb-btn" data-tag="i" title="斜体"><i>I</i></button>
+              <button class="memo-tb-btn" data-tag="u" title="下線"><u>U</u></button>
+              <button class="memo-tb-btn" data-tag="s" title="取消線"><s>S</s></button>
+              <span class="memo-tb-sep"></span>
+              <select class="memo-tb-select" data-action="size" title="サイズ">
+                <option value="">サイズ</option>
+                <option value="12px">小</option>
+                <option value="16px">中</option>
+                <option value="20px">大</option>
+                <option value="28px">特大</option>
+              </select>
+              <input type="color" class="memo-tb-color" data-action="color" value="#000000" title="文字色">
+              <span class="memo-tb-sep"></span>
+              <button class="memo-tb-btn" data-action="link" title="リンク">🔗</button>
+              <button class="memo-tb-btn" data-action="code" title="コード">&lt;/&gt;</button>
+              <span class="memo-tb-sep"></span>
+              <button class="memo-tb-btn memo-tb-preview" data-action="preview" title="プレビュー切替">プレビュー</button>
+            </div>
+            <textarea class="memo-expand-body" id="memoExpandBody" placeholder="テキストを入力..."></textarea>
+            <div class="memo-expand-preview" id="memoExpandPreview" hidden></div>
+            <div class="memo-expand-actions">
+              <button class="btn btn-ghost" id="memoExpandCopy">コピー</button>
+              <button class="btn btn-ghost" id="memoExpandDelete">削除</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>

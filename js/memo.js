@@ -12,6 +12,8 @@ window.MemoModule = (() => {
   let initialized = false;
   let eventsbound = false;
   let editMode = false;
+  let expandedItemIndex = -1;
+  let expandPreviewMode = false;
 
   function init() {
     if (initialized) return;
@@ -108,6 +110,71 @@ window.MemoModule = (() => {
     document.getElementById('memoTagAddBtn').addEventListener('click', addTag);
     document.getElementById('memoAddBtn').addEventListener('click', addItem);
     document.getElementById('memoEditModeBtn').addEventListener('click', toggleEditMode);
+
+    // 展開表示関連
+    document.getElementById('memoExpandClose').addEventListener('click', closeExpandView);
+    document.getElementById('memoExpandCopy').addEventListener('click', copyExpandedItem);
+    document.getElementById('memoExpandDelete').addEventListener('click', deleteExpandedItem);
+    document.getElementById('memoExpandTitle').addEventListener('input', saveExpandedItem);
+    document.getElementById('memoExpandBody').addEventListener('input', saveExpandedItem);
+
+    // 展開表示ツールバー
+    const toolbar = document.getElementById('memoExpandToolbar');
+    const bodyEl = document.getElementById('memoExpandBody');
+    const previewEl = document.getElementById('memoExpandPreview');
+
+    toolbar.querySelectorAll('.memo-tb-btn[data-tag]').forEach(btn => {
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const tag = btn.dataset.tag;
+        wrapExpandSelection('<' + tag + '>', '</' + tag + '>');
+      });
+    });
+
+    toolbar.querySelector('[data-action="size"]').addEventListener('change', (e) => {
+      const size = e.target.value;
+      if (size) {
+        wrapExpandSelection('<span style="font-size:' + size + '">', '</span>');
+        e.target.value = '';
+      }
+    });
+
+    toolbar.querySelector('[data-action="color"]').addEventListener('input', (e) => {
+      wrapExpandSelection('<span style="color:' + e.target.value + '">', '</span>');
+    });
+
+    toolbar.querySelector('[data-action="link"]').addEventListener('click', () => {
+      const url = prompt('リンクURL:');
+      if (url) wrapExpandSelection('<a href="' + url + '" target="_blank">', '</a>');
+    });
+
+    toolbar.querySelector('[data-action="code"]').addEventListener('click', () => {
+      wrapExpandSelection('<code>', '</code>');
+    });
+
+    toolbar.querySelector('[data-action="preview"]').addEventListener('click', () => {
+      expandPreviewMode = !expandPreviewMode;
+      if (expandPreviewMode) {
+        previewEl.innerHTML = sanitizeHTML(bodyEl.value);
+        bodyEl.hidden = true;
+        previewEl.hidden = false;
+      } else {
+        bodyEl.hidden = false;
+        previewEl.hidden = true;
+      }
+    });
+  }
+
+  function wrapExpandSelection(openTag, closeTag) {
+    const bodyEl = document.getElementById('memoExpandBody');
+    const start = bodyEl.selectionStart;
+    const end = bodyEl.selectionEnd;
+    const val = bodyEl.value;
+    const selected = val.substring(start, end);
+    bodyEl.value = val.substring(0, start) + openTag + selected + closeTag + val.substring(end);
+    bodyEl.focus();
+    bodyEl.setSelectionRange(start + openTag.length, start + openTag.length + selected.length);
+    saveExpandedItem();
   }
 
   /* --- Edit Mode --- */
@@ -121,6 +188,77 @@ window.MemoModule = (() => {
     editMode = false;
     renderItems();
     renderTags();
+  }
+
+  /* --- Expand View (全画面メモ表示) --- */
+  function openExpandView(index) {
+    const tag = data.tags[data.activeTag];
+    if (!tag || !tag.items[index]) return;
+
+    expandedItemIndex = index;
+    expandPreviewMode = false;
+    const item = tag.items[index];
+
+    const expandView = document.getElementById('memoExpandView');
+    const titleEl = document.getElementById('memoExpandTitle');
+    const bodyEl = document.getElementById('memoExpandBody');
+    const previewEl = document.getElementById('memoExpandPreview');
+    const itemList = document.getElementById('memoItemList');
+
+    titleEl.value = item.title || '';
+    bodyEl.value = item.body || '';
+    bodyEl.hidden = false;
+    previewEl.hidden = true;
+
+    itemList.style.display = 'none';
+    expandView.hidden = false;
+    titleEl.focus();
+  }
+
+  function closeExpandView() {
+    expandedItemIndex = -1;
+    expandPreviewMode = false;
+
+    const expandView = document.getElementById('memoExpandView');
+    const itemList = document.getElementById('memoItemList');
+
+    expandView.hidden = true;
+    itemList.style.display = '';
+    renderItems();
+  }
+
+  function saveExpandedItem() {
+    if (expandedItemIndex < 0) return;
+    const tag = data.tags[data.activeTag];
+    if (!tag || !tag.items[expandedItemIndex]) return;
+
+    const titleEl = document.getElementById('memoExpandTitle');
+    const bodyEl = document.getElementById('memoExpandBody');
+
+    tag.items[expandedItemIndex].title = titleEl.value;
+    tag.items[expandedItemIndex].body = bodyEl.value;
+    save();
+  }
+
+  function copyExpandedItem() {
+    const bodyEl = document.getElementById('memoExpandBody');
+    navigator.clipboard.writeText(bodyEl.value).then(() => {
+      const btn = document.getElementById('memoExpandCopy');
+      const orig = btn.textContent;
+      btn.textContent = 'コピー完了!';
+      setTimeout(() => { btn.textContent = orig; }, 1000);
+    });
+  }
+
+  function deleteExpandedItem() {
+    if (expandedItemIndex < 0) return;
+    const tag = data.tags[data.activeTag];
+    if (!tag) return;
+
+    if (!confirm('このメモを削除しますか？')) return;
+    tag.items.splice(expandedItemIndex, 1);
+    save();
+    closeExpandView();
   }
 
   /* --- Tags --- */
@@ -240,13 +378,8 @@ window.MemoModule = (() => {
     tag.items.push({ title: '', body: '' });
     save();
     renderItems();
-    // 最後のアイテムを編集状態に
-    const items = document.querySelectorAll('.memo-item');
-    if (items.length) {
-      const last = items[items.length - 1];
-      const editBtn = last.querySelector('[data-action="edit"]');
-      if (editBtn) editBtn.click();
-    }
+    // 新規アイテムを展開表示で開く
+    openExpandView(tag.items.length - 1);
   }
 
   function deleteItem(itemIndex) {
@@ -469,11 +602,11 @@ window.MemoModule = (() => {
           </div>
           <div class="memo-item-body">${sanitizeHTML(item.body) || '<span style="color:var(--mg)">(空)</span>'}</div>
         `;
-        // ボディクリックで編集モード
-        el.querySelector('.memo-item-body').addEventListener('click', () => startEdit(i));
-        el.querySelector('[data-action="copy"]').addEventListener('click', () => copyItem(i));
-        el.querySelector('[data-action="edit"]').addEventListener('click', () => startEdit(i));
-        el.querySelector('[data-action="delete"]').addEventListener('click', () => deleteItem(i));
+        // クリックで展開表示
+        el.querySelector('.memo-item-body').addEventListener('click', () => openExpandView(i));
+        el.querySelector('[data-action="copy"]').addEventListener('click', (e) => { e.stopPropagation(); copyItem(i); });
+        el.querySelector('[data-action="edit"]').addEventListener('click', (e) => { e.stopPropagation(); openExpandView(i); });
+        el.querySelector('[data-action="delete"]').addEventListener('click', (e) => { e.stopPropagation(); deleteItem(i); });
       }
 
       list.appendChild(el);

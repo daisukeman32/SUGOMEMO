@@ -1070,6 +1070,55 @@ body.seeking, body.seeking * { cursor: col-resize !important; }
   flex-shrink: 0; background: var(--subtle);
 }
 
+/* Expand View (メモ展開表示 - アイテムリスト部分のみ) */
+.memo-expand-view {
+  flex: 1; display: flex; flex-direction: column;
+  background: var(--bg); overflow: hidden;
+}
+.memo-expand-view[hidden] { display: none; }
+
+.memo-expand-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  background: var(--subtle);
+}
+.memo-expand-title {
+  flex: 1; font-family: var(--font); font-size: var(--base-font); font-weight: 700;
+  border: none; background: transparent; color: var(--fg);
+  outline: none; padding: 4px 0;
+}
+.memo-expand-title::placeholder { color: var(--mg); }
+.memo-expand-close {
+  width: 28px; height: 28px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--fg); font-size: 16px; font-weight: 400;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.memo-expand-close:hover { background: var(--fg); color: var(--bg); }
+
+.memo-expand-toolbar {
+  display: flex; align-items: center; gap: 2px;
+  padding: 8px 20px; background: var(--subtle);
+  border-bottom: 0.5px solid var(--border); flex-wrap: wrap;
+}
+
+.memo-expand-body {
+  flex: 1; font-family: var(--font); font-size: var(--base-font);
+  border: none; background: transparent; color: var(--fg);
+  padding: 16px 20px; outline: none; resize: none; line-height: 1.8;
+}
+.memo-expand-body::placeholder { color: var(--mg); }
+
+.memo-expand-preview {
+  flex: 1; font-size: var(--base-font); padding: 16px 20px;
+  line-height: 1.8; color: var(--fg); overflow-y: auto;
+}
+.memo-expand-preview[hidden] { display: none; }
+
+.memo-expand-actions {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 20px; border-top: 1px solid var(--border);
+}
+
 /* ========================================
    Scrollbar
    ======================================== */
