@@ -39,7 +39,7 @@ window.ImageModule = (() => {
   const SNAP_BREAK_MULT = 3.5;
 
   let dropZone, workspace, canvas, canvasCtx, objectsLayer;
-  let propsBar, propX, propY, propRotation, propScale;
+  let propsBar;
 
   function init() {
     if (initialized) return;
@@ -53,10 +53,6 @@ window.ImageModule = (() => {
     penCanvas = document.getElementById('imagePenCanvas');
     penCtx = penCanvas.getContext('2d');
     propsBar = document.getElementById('imagePropsBar');
-    propX = document.getElementById('propX');
-    propY = document.getElementById('propY');
-    propRotation = document.getElementById('propRotation');
-    propScale = document.getElementById('propScale');
 
     if (!eventsbound) { bindEvents(); eventsbound = true; }
 
@@ -118,12 +114,13 @@ window.ImageModule = (() => {
     });
     document.getElementById('imageExportBtn').addEventListener('click', exportImage);
     document.getElementById('imageResetBtn').addEventListener('click', reset);
+
+    // Zoom buttons
+    document.getElementById('imageZoomIn').addEventListener('click', onZoomIn);
+    document.getElementById('imageZoomOut').addEventListener('click', onZoomOut);
+    document.getElementById('imageZoomFit').addEventListener('click', onZoomFit);
     document.getElementById('propDeleteBtn').addEventListener('click', () => {
       if (selectedId >= 0) deleteObject(selectedId);
-    });
-
-    [propX, propY, propRotation, propScale].forEach(input => {
-      input.addEventListener('change', applyProps);
     });
 
     document.getElementById('propBringFront').addEventListener('click', () => bringToFront(selectedId));
@@ -240,6 +237,7 @@ window.ImageModule = (() => {
     document.getElementById('canvasBgColor').value = canvasBgColor;
     updateCanvas();
     renderObjects();
+    updateZoomDisplay();
   }
 
   /* --- Canvas --- */
@@ -284,11 +282,17 @@ window.ImageModule = (() => {
     renderObjects();
   }
 
-  function updateCanvas() {
+  let userZoom = null; // null = auto fit
+
+  function fitZoom() {
     const area = document.getElementById('imageCanvasArea');
     const areaW = area.clientWidth - 40;
     const areaH = area.clientHeight - 40;
-    zoom = Math.min(areaW / canvasW, areaH / canvasH, 1);
+    return Math.min(areaW / canvasW, areaH / canvasH, 1);
+  }
+
+  function updateCanvas() {
+    zoom = userZoom !== null ? userZoom : fitZoom();
 
     const displayW = Math.round(canvasW * zoom);
     const displayH = Math.round(canvasH * zoom);
@@ -339,7 +343,7 @@ window.ImageModule = (() => {
     if (objects[id].url) URL.revokeObjectURL(objects[id].url);
     objects.splice(id, 1);
     selectedId = -1;
-    propsBar.hidden = true;
+    updatePropsButtons();
     renderObjects();
     if (objects.length === 0) reset();
   }
@@ -349,28 +353,14 @@ window.ImageModule = (() => {
     objectsLayer.querySelectorAll('.canvas-object').forEach((el, i) => {
       el.classList.toggle('selected', i === id);
     });
-    if (id >= 0 && objects[id]) {
-      const obj = objects[id];
-      propsBar.hidden = false;
-      propX.value = obj.x; propY.value = obj.y;
-      propRotation.value = obj.rotation; propScale.value = obj.scale;
-    } else {
-      propsBar.hidden = true;
-    }
+    updatePropsButtons();
   }
 
-  function applyProps() {
-    if (selectedId < 0 || !objects[selectedId]) return;
-    const obj = objects[selectedId];
-    obj.x = parseInt(propX.value) || 0;
-    obj.y = parseInt(propY.value) || 0;
-    obj.rotation = parseInt(propRotation.value) || 0;
-    const ns = parseInt(propScale.value) || 100;
-    if (ns !== obj.scale) {
-      const r = ns / obj.scale;
-      obj.w = Math.round(obj.w * r); obj.h = Math.round(obj.h * r); obj.scale = ns;
-    }
-    renderObjects();
+  function updatePropsButtons() {
+    const has = selectedId >= 0 && objects[selectedId];
+    document.getElementById('propBringFront').disabled = !has;
+    document.getElementById('propSendBack').disabled = !has;
+    document.getElementById('propDeleteBtn').disabled = !has;
   }
 
   /* --- Layer --- */
@@ -527,7 +517,9 @@ window.ImageModule = (() => {
       }
     });
 
-    // Show/hide tool-specific options
+    // Show/hide tool-specific options + separator
+    const anyTool = penMode && currentTool;
+    document.getElementById('drawSep').hidden = !anyTool;
     document.getElementById('penOptions').hidden = !(penMode && currentTool === 'pen');
     document.getElementById('gaussOptions').hidden = !(penMode && currentTool === 'gauss');
     document.getElementById('mosaicOptions').hidden = !(penMode && currentTool === 'mosaic');
@@ -783,7 +775,7 @@ window.ImageModule = (() => {
       objects.forEach(o => { if (o.url) URL.revokeObjectURL(o.url); });
       objects = [];
       selectedId = -1;
-      propsBar.hidden = true;
+      updatePropsButtons();
       updateCanvas();
       renderObjects();
     };
@@ -1015,8 +1007,33 @@ window.ImageModule = (() => {
     canvasW = 1920; canvasH = 1080; canvasBgColor = '#ffffff'; canvasBgImage = null;
     dropZone.hidden = false;
     workspace.hidden = true;
-    propsBar.hidden = true;
+    updatePropsButtons();
   }
 
-  return { init, destroy, onThemeChange, onDelete };
+  function onZoomIn() {
+    const base = userZoom !== null ? userZoom : fitZoom();
+    userZoom = Math.min(base * 1.25, 5);
+    updateCanvas(); renderObjects();
+    updateZoomDisplay();
+  }
+  function onZoomOut() {
+    const base = userZoom !== null ? userZoom : fitZoom();
+    userZoom = Math.max(base / 1.25, 0.1);
+    updateCanvas(); renderObjects();
+    updateZoomDisplay();
+  }
+  function onZoomFit() {
+    userZoom = null;
+    // スクロールリセットしてからエリアサイズを正確に取得
+    const area = document.getElementById('imageCanvasArea');
+    area.scrollTop = 0; area.scrollLeft = 0;
+    updateCanvas(); renderObjects();
+    updateZoomDisplay();
+  }
+  function updateZoomDisplay() {
+    const el = document.getElementById('imageZoomVal');
+    if (el) el.textContent = Math.round(zoom * 100) + '%';
+  }
+
+  return { init, destroy, onThemeChange, onDelete, onZoomIn, onZoomOut, onZoomFit };
 })();
