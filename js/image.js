@@ -955,8 +955,15 @@ window.ImageModule = (() => {
       const rawY = Math.round(dragState.origY + dy);
       obj.x = rawX;
       obj.y = rawY;
-      const guides = snapPosition(obj, rawX, rawY);
-      showSnapGuides(guides);
+      // Option(Mac) / Alt(Win) でスナップ無効化 → 自由移動
+      if (e.altKey) {
+        clearSnapGuides();
+        snapLockX = null;
+        snapLockY = null;
+      } else {
+        const guides = snapPosition(obj, rawX, rawY);
+        showSnapGuides(guides);
+      }
     } else if (dragState.mode === 'resize') {
       const aspect = dragState.aspect || 1;
       const corner = dragState.corner || 'br';
